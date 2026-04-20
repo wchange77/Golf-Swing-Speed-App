@@ -30,7 +30,9 @@ final class BallDetectionViewModel: ObservableObject {
             return
         }
 
-        let ball = manifest.datasets.first(where: { $0.key == "golf_ball_detection" })
+        let ball = manifest.dataset?.key == "golf_ball_detection"
+            ? manifest.dataset
+            : manifest.datasets?.first(where: { $0.key == "golf_ball_detection" })
         if let ball {
             manifestSummary = "球数据集样本: \(ball.samples) (\(ball.format))"
         } else {

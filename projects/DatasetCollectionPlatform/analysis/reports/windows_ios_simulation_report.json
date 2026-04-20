@@ -1,0 +1,15 @@
+{
+  "sessionId": "sess_cd9a137cccea",
+  "humanSamples": 1,
+  "ballSamples": 1,
+  "duplicateEvents": 1,
+  "validationErrors": 0,
+  "manifestUniqueSamples": 2,
+  "steps": {
+    "start_session": "ok",
+    "register_samples": "ok",
+    "split_dataset": "ok",
+    "generate_manifest": "ok",
+    "validate_registry": "ok"
+  }
+}

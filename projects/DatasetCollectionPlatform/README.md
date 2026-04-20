@@ -38,6 +38,17 @@
 - `GOLF_BALL_MANIFEST_PATH`
 - `DATASET_MANIFEST_PATH`（通用回退）
 
+## 3.1 Apple OS 采集端代码
+
+- 目录：`AppleOSDatasetCollectorApp/`
+- 说明：SwiftUI 工程骨架，支持会话创建、样本登记、SHA-256 去重、JSONL 导出
+- 在 macOS 上生成工程：
+
+```bash
+cd AppleOSDatasetCollectorApp
+xcodegen generate --spec project.yml
+```
+
 ## 4. 快速执行（iPhone 17 Max 采集）
 
 ```bash
@@ -90,6 +101,9 @@ python tools/split_dataset.py --domain golf_ball_detection --strategy session --
 python tools/generate_manifest.py
 python tools/generate_quality_report.py
 python tools/validate_registry.py --strict
+
+# 6) Windows 模拟 iOS 采集并跑全链路
+python tools/simulate_ios_workflow.py
 ```
 
 ## 5. 质量关口（必须全部通过）
@@ -98,6 +112,7 @@ python tools/validate_registry.py --strict
 2. 重复率在 `analysis/reports/quality_report.md` 可追踪。
 3. 两个域都存在 `exports/splits/<domain>.json`。
 4. 三个消费者清单都已生成并可被下游读取。
+5. `analysis/reports/windows_ios_simulation_report.md` 生成并通过。
 
 ## 6. 设备档案说明
 
