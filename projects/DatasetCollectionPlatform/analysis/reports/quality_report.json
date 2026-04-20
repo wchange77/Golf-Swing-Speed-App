@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "activeSamples": 0,
+    "duplicateEvents": 0,
+    "sessions": 0,
+    "duplicateRatio": 0.0
+  },
+  "byDomain": {},
+  "duplicateByDomain": {},
+  "sessionByDevice": {},
+  "domainSessionCoverage": {}
+}

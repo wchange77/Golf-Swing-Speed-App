@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://golf-swing-speed-app.local/contracts/session-record.schema.json",
+  "title": "Collection Session",
+  "type": "object",
+  "required": [
+    "sessionId",
+    "collector",
+    "device",
+    "deviceProfile",
+    "createdAt",
+    "status",
+    "captureConfig",
+    "environment",
+    "targetDomains"
+  ],
+  "properties": {
+    "sessionId": { "type": "string", "pattern": "^sess_[a-z0-9]{12}$" },
+    "collector": { "type": "string" },
+    "device": { "type": "string" },
+    "deviceProfile": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["active", "closed"] },
+    "iosVersion": { "type": "string" },
+    "appVersion": { "type": "string" },
+    "notes": { "type": "string" },
+    "captureConfig": {
+      "type": "object",
+      "required": ["fps", "resolution"],
+      "properties": {
+        "fps": { "type": "integer", "minimum": 1 },
+        "resolution": { "type": "string" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["sceneType", "lighting", "tripod"],
+      "properties": {
+        "sceneType": { "type": "string", "enum": ["indoor", "outdoor", "mixed"] },
+        "lighting": { "type": "string" },
+        "tripod": { "type": "boolean" },
+        "distanceMeters": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "targetDomains": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["human_club", "golf_ball_detection"] }
+    },
+    "profileSnapshot": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

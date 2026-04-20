@@ -1,0 +1,17 @@
+profileId: iphone17max
+displayName: iPhone 17 Max
+specStatus: pending_official_confirmation
+specSource: "https://www.apple.com/iphone/"
+notes: "以真机采集日志为准；此模板只提供采集默认值。"
+collectionDefaults:
+  fps: 240
+  resolution: "1920x1080"
+  sceneType: indoor
+  lighting: indoor_led
+  tripod: true
+runtimeProbe:
+  required: true
+  probes:
+    - camera_formats
+    - thermal_state
+    - frame_timestamp_stability

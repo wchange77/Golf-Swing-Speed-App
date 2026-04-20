@@ -1,0 +1,47 @@
+{
+  "version": "1.2",
+  "generatedAt": "2026-04-20T06:56:54.710125+00:00",
+  "consumer": "pitrac_feasibility_study",
+  "domains": [
+    "human_club",
+    "golf_ball_detection"
+  ],
+  "registry": {
+    "samplesFile": "datasets/registry/samples.jsonl",
+    "duplicatesFile": "datasets/registry/duplicates.jsonl",
+    "sessionsFile": "datasets/registry/sessions.jsonl",
+    "uniqueSamples": 0,
+    "duplicateSamples": 0,
+    "sessions": 0,
+    "lastSessionAt": null,
+    "lastSampleAt": null
+  },
+  "datasets": [
+    {
+      "key": "human_club",
+      "path": "datasets/processed/human_club",
+      "samples": 0,
+      "format": "coco",
+      "duplicateFiltered": 0,
+      "splitFile": "exports/splits/human_club.json",
+      "split": {
+        "train": 0,
+        "val": 0,
+        "test": 0
+      }
+    },
+    {
+      "key": "golf_ball_detection",
+      "path": "datasets/processed/golf_ball_detection",
+      "samples": 0,
+      "format": "yolo",
+      "duplicateFiltered": 0,
+      "splitFile": "exports/splits/golf_ball_detection.json",
+      "split": {
+        "train": 0,
+        "val": 0,
+        "test": 0
+      }
+    }
+  ]
+}

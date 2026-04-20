@@ -25,6 +25,14 @@ Pods/
 .DS_Store
 *.swp
 *~
+__pycache__/
+*.pyc
 
 # Xcode automatically generated (regenerate with xcodegen)
 # The .xcodeproj is generated from project.yml — don't commit it
+
+# Dataset artifacts
+projects/DatasetCollectionPlatform/datasets/raw/**
+projects/DatasetCollectionPlatform/datasets/processed/**
+!projects/DatasetCollectionPlatform/datasets/raw/.gitkeep
+!projects/DatasetCollectionPlatform/datasets/processed/.gitkeep

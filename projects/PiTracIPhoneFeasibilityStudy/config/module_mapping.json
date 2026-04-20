@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "targetDevice": "iPhone 17 Pro Max",
+  "sourceRepo": "https://github.com/PiTracLM/PiTrac",
+  "modules": [
+    {
+      "name": "camera_pipeline",
+      "pitrac_sources": [
+        "Software/LMSourceCode/ImageProcessing/Camera/README.md",
+        "Software/LMSourceCode/ImageProcessing/Camera/infrastructure/unix/libcamera_unix_impl.hpp"
+      ],
+      "ios_target": "AVFoundation",
+      "feasibility": "replaceable",
+      "risk": "medium"
+    },
+    {
+      "name": "image_analysis",
+      "pitrac_sources": [
+        "Software/LMSourceCode/ImageProcessing/ImageAnalysis/infrastructure/opencv_image_analyzer.cpp"
+      ],
+      "ios_target": "Vision+CoreML+Metal",
+      "feasibility": "replaceable",
+      "risk": "medium"
+    },
+    {
+      "name": "calibration",
+      "pitrac_sources": [
+        "Software/CalibrateCameraDistortions/CameraCalibration.py",
+        "Software/CalibrateCameraDistortions/generate_charuco_board.py"
+      ],
+      "ios_target": "iOS guided calibration + offline calibration utils",
+      "feasibility": "partial",
+      "risk": "medium"
+    },
+    {
+      "name": "hardware_io",
+      "pitrac_sources": [
+        "docs/hardware/hardware.md"
+      ],
+      "ios_target": "no direct equivalent",
+      "feasibility": "not_equivalent",
+      "risk": "high"
+    },
+    {
+      "name": "web_control_plane",
+      "pitrac_sources": [
+        "Software/web-server/main.py",
+        "Software/web-server/server.py"
+      ],
+      "ios_target": "in-app configuration and diagnostics",
+      "feasibility": "replaceable",
+      "risk": "medium"
+    }
+  ]
+}

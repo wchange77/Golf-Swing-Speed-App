@@ -1,0 +1,14 @@
+version: "1.1"
+domains:
+  - key: human_club
+    raw_path: datasets/raw/human_club
+    processed_path: datasets/processed/human_club
+    label_format: coco
+  - key: golf_ball_detection
+    raw_path: datasets/raw/golf_ball_detection
+    processed_path: datasets/processed/golf_ball_detection
+    label_format: yolo
+split:
+  train: 0.8
+  val: 0.1
+  test: 0.1

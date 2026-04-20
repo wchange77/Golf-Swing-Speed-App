@@ -1184,3 +1184,20 @@ struct ARCalibrationView: UIViewRepresentable {
 -[ARKit LiDAR 点云 — Medium](https://medium.com/@ivkuznetsov/arkit-lidar-building-point-clouds-in-swift-2c9b7eb88b03)
 -[SwiftUI 应用程序中的 ARKit — gfrigerio.com](https://www.gfrigerio.com/arkit-in-a-swiftui-app/)
 -[Apple 开发者论坛 — ARKit + AVCaptureSession](https://developer.apple.com/forums/thread/677731)
+
+## 核实注释（2026-04-20）
+
+### 已核实（含来源）
+- ARKit 世界跟踪、场景重建、raycast 路径：R05-R07。
+- Vision 3D 人体姿态请求入口：R08-R09。
+- 与相机时间轴对齐的帧时间戳来源：R10。
+
+### 详细检查与注释
+- 文档中“2-3m 下姿态绝对误差固定范围”类断言需标记为“待实测”，官方文档通常不给固定精度承诺。
+- “地址位球杆头检测”目前更多依赖算法设计与数据质量，不应写成“已保证”。
+- 建议把“校准失败回退策略”从建议级提升为必选流程。
+
+### 待补研究内容
+- 增加“raycast 失败与重试”状态机图。
+- 增加“标定置信度评分”公式与阈值。
+- 增加“姿态 + 深度融合误差”实测章节。

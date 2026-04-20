@@ -784,3 +784,20 @@ Phase 3: ANALYSIS (Post-capture, no time pressure)
 -[RealityKit 场景理解（Apple 开发者）](https://developer.apple.com/documentation/realitykit/realitykit-scene-understanding)
 -[iOS 16：ARKit 和 RealityKit 测量对象（中/回转构建）](https://medium.com/slalom-build/ios-16-how-arkit-and-realitykit-help-measure-objects-accurately-9128f4ca57a0)
 -[iPhone LiDAR（MDPI 传感器）的精度评估](https://www.mdpi.com/1424-8220/25/19/6141)
+
+## 核实注释（2026-04-20）
+
+### 已核实（含来源）
+- iPhone 12/13/14 Pro 规格页明确包含 LiDAR 与 1080p 120/240fps 慢动作条目：R01-R03。
+- iPhone 15 Pro 规格页当前显示慢动作条目为 1080p 120fps：R04。
+- 高帧率采集应通过 AVFoundation 帧时长控制与真实时间戳计算：R10-R11。
+
+### 详细检查与注释
+- 文档内关于“所有 Pro 机型均 240fps 慢动作”的统一说法需改为“按机型分列”，避免误导。
+- 文档内若出现具体 LiDAR 精度固定值，需注明“距离/环境依赖”。
+- 与 Vision/ARKit 相关的 API 名称建议直接附官方链接，减少二次误译风险。
+
+### 待补研究内容
+- 新增“机型差异附录”：按 iPhone 12 Pro 至最新 Pro 机型逐项列出视频规格。
+- 新增“采样脚本结果”字段：记录实际 `presentationTimeStamp` 统计分布。
+- 新增“热管理基线测试”：持续采集时长与降频拐点。
