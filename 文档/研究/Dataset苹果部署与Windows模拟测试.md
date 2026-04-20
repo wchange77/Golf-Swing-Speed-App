@@ -102,7 +102,38 @@ open DatasetCollectorApp.xcodeproj
 
 ---
 
-## 7. 参考来源
+## 7. 第二轮复测（2026-04-20）
+
+### 7.1 执行命令与结果
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| AppleOS 工程结构校验 | `python tools/validate_apple_project.py` | 通过（`ok=true`，`deploymentTargetiOS=17.0`） |
+| Windows 全链路模拟 | `python tools/simulate_ios_workflow.py` | 通过（会话 ID 见 `windows_ios_simulation_report.md`，重复事件 1） |
+| 注册表严格校验 | `python tools/validate_registry.py --strict` | 通过（当前仓库 `sessions=0, samples=0, errors=0`） |
+
+### 7.2 关键结论
+
+1. Windows 端可以验证“AppleOS 工程结构 + 数据契约链路”，但不能替代 iOS 编译与真机运行。  
+2. 模拟链路已覆盖“重复样本场景”，可以验证去重与重复登记逻辑。  
+3. 当前仓库 registry 为空是预期状态，因为模拟在临时工作目录执行。  
+
+### 7.3 来源可达性核验（网络不稳时走 7897 代理）
+
+| 来源ID | 链接 | 2026-04-20 复核状态 |
+|---|---|---|
+| R31 | JSON Schema Draft 2020-12 | 200（`proxy7897`） |
+| R32 | JSON Lines | 200（`proxy7897`） |
+| R39 | FileManager | 200（`proxy7897`） |
+| R40 | JSONEncoder | 200（`proxy7897`） |
+| R41 | CryptoKit SHA256 | 200（`proxy7897`） |
+| R42 | XCTest | 200（`proxy7897`） |
+| R10 | CMSampleBuffer.presentationTimeStamp | 首次超时后重试 200（`proxy7897`） |
+| R43 | XcodeGen 官方仓库 | 200（`proxy7897`） |
+
+---
+
+## 8. 参考来源
 
 - R39 FileManager: https://developer.apple.com/documentation/foundation/filemanager  
 - R40 JSONEncoder: https://developer.apple.com/documentation/foundation/jsonencoder  
@@ -110,3 +141,5 @@ open DatasetCollectorApp.xcodeproj
 - R42 XCTest: https://developer.apple.com/documentation/xctest  
 - R31 JSON Schema Draft 2020-12: https://json-schema.org/draft/2020-12  
 - R32 JSON Lines: https://jsonlines.org/  
+- R10 CMSampleBuffer.presentationTimeStamp: https://developer.apple.com/documentation/coremedia/cmsamplebuffer/presentationtimestamp  
+- R43 XcodeGen: https://github.com/yonaskolb/XcodeGen  

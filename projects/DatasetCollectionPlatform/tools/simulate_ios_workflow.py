@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,13 +60,18 @@ def write_report(summary: dict, output_json: Path, output_md: Path) -> None:
         "# Windows 端 iOS 采集流程模拟报告",
         "",
         f"- 会话 ID: `{summary['sessionId']}`",
+        f"- 模拟时间(UTC): `{summary['simulatedAtUtc']}`",
         f"- human_club 样本数: {summary['humanSamples']}",
         f"- golf_ball_detection 样本数: {summary['ballSamples']}",
         f"- 重复样本事件: {summary['duplicateEvents']}",
         f"- 校验错误数: {summary['validationErrors']}",
         f"- 总样本数（manifest）: {summary['manifestUniqueSamples']}",
+        f"- AppleOS 工程校验: {summary['appleProjectValidation']['ok']}",
+        f"- Swift 源码文件数: {summary['appleProjectValidation']['counts']['swiftSources']}",
+        f"- Swift 测试文件数: {summary['appleProjectValidation']['counts']['swiftTests']}",
         "",
         "## 命令状态",
+        f"- `validate_apple_project`: {summary['steps']['validate_apple_project']}",
         f"- `start_session`: {summary['steps']['start_session']}",
         f"- `register_samples`: {summary['steps']['register_samples']}",
         f"- `split_dataset`: {summary['steps']['split_dataset']}",
@@ -89,6 +95,7 @@ def main() -> None:
     shutil.copytree(ROOT, workspace, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
     steps = {
+        "validate_apple_project": "pending",
         "start_session": "pending",
         "register_samples": "pending",
         "split_dataset": "pending",
@@ -97,6 +104,10 @@ def main() -> None:
     }
 
     try:
+        validation_output = run([sys.executable, "tools/validate_apple_project.py"], workspace).splitlines()[-1]
+        apple_project_validation = json.loads(validation_output)
+        steps["validate_apple_project"] = "ok"
+
         sample_paths = write_demo_inputs(workspace)
 
         session_id = run(
@@ -206,11 +217,13 @@ def main() -> None:
 
         summary = {
             "sessionId": session_id,
+            "simulatedAtUtc": datetime.now(timezone.utc).isoformat(),
             "humanSamples": human_samples,
             "ballSamples": ball_samples,
             "duplicateEvents": quality["summary"]["duplicateEvents"],
             "validationErrors": validation["errors"],
             "manifestUniqueSamples": manifest["registry"]["uniqueSamples"],
+            "appleProjectValidation": apple_project_validation,
             "steps": steps,
         }
 

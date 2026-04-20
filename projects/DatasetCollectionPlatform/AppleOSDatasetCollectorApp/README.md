@@ -30,9 +30,11 @@ open DatasetCollectorApp.xcodeproj
 iOS 导出目录中的 `sessions.jsonl / samples.jsonl / duplicates.jsonl` 字段与
 `contracts/session_record.schema.json`、`contracts/sample_record.schema.json` 对齐。
 
-在 Windows 上无法直接编译 iOS 工程，可使用：
+在 Windows 上无法直接编译 iOS 工程，可在 `projects/DatasetCollectionPlatform` 目录执行：
 
 ```bash
+cd projects/DatasetCollectionPlatform
+python tools/validate_apple_project.py
 python tools/simulate_ios_workflow.py
 ```
 

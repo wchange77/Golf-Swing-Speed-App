@@ -102,7 +102,10 @@ python tools/generate_manifest.py
 python tools/generate_quality_report.py
 python tools/validate_registry.py --strict
 
-# 6) Windows 模拟 iOS 采集并跑全链路
+# 6) Windows 先做 AppleOS 工程结构校验
+python tools/validate_apple_project.py
+
+# 7) Windows 模拟 iOS 采集并跑全链路
 python tools/simulate_ios_workflow.py
 ```
 
@@ -112,7 +115,8 @@ python tools/simulate_ios_workflow.py
 2. 重复率在 `analysis/reports/quality_report.md` 可追踪。
 3. 两个域都存在 `exports/splits/<domain>.json`。
 4. 三个消费者清单都已生成并可被下游读取。
-5. `analysis/reports/windows_ios_simulation_report.md` 生成并通过。
+5. `tools/validate_apple_project.py` 通过，且 `project.yml` 关键路径完整。
+6. `analysis/reports/windows_ios_simulation_report.md` 生成并通过。
 
 ## 6. 设备档案说明
 
