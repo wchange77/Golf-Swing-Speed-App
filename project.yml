@@ -19,11 +19,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: GolfSwingSpeedApp/App
-      - path: GolfSwingSpeedApp/Features
-      - path: GolfSwingSpeedApp/Managers
-      - path: GolfSwingSpeedApp/Models
-      - path: GolfSwingSpeedApp/Utilities
+      - path: GolfSwingSpeedApp/Sources
       - path: GolfSwingSpeedApp/Resources
     info:
       path: GolfSwingSpeedApp/Info.plist
@@ -47,7 +43,7 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: GolfSwingSpeedApp/GolfSwingSpeedAppTests
+      - path: GolfSwingSpeedApp/Tests/Unit
     dependencies:
       - target: GolfSwingSpeedApp
     settings:
