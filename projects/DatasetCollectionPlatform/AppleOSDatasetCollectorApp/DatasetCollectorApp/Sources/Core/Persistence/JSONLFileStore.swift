@@ -95,4 +95,25 @@ final class JSONLFileStore {
         }
         return "ios_export/\(url.lastPathComponent)"
     }
+
+    func rewriteRecords<T: Codable>(_ type: T.Type, to fileURL: URL, excluding filter: (T) -> Bool) throws {
+        let records = try readRecords(type, from: fileURL)
+        let kept = records.filter { !filter($0) }
+        let data = try kept.map { try encoder.encode($0) }
+            .compactMap { String(data: $0, encoding: .utf8) }
+            .joined(separator: "\n")
+        let content = data.isEmpty ? "" : data + "\n"
+        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+    }
+
+    func deleteAssetFile(at relativePath: String) {
+        let fullPath: String
+        if relativePath.hasPrefix("ios_export/") {
+            let suffix = String(relativePath.dropFirst("ios_export/".count))
+            fullPath = baseDirectory.appendingPathComponent(suffix).path
+        } else {
+            fullPath = baseDirectory.appendingPathComponent(relativePath).path
+        }
+        try? fileManager.removeItem(atPath: fullPath)
+    }
 }

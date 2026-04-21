@@ -26,12 +26,13 @@ targets:
         NSPhotoLibraryUsageDescription: "Dataset Collector needs access to photo library for dataset export/import."
         NSPhotoLibraryAddUsageDescription: "Dataset Collector needs permission to export captured dataset files."
         NSCameraUsageDescription: "Dataset Collector needs camera access to capture dataset samples."
+        NSMicrophoneUsageDescription: "Dataset Collector may use microphone for audio-triggered recording."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wchange77.DatasetCollectorApp
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "G335FJTJ35"
         CODE_SIGN_STYLE: Automatic
     entitlements:
       path: DatasetCollectorApp/DatasetCollectorApp.entitlements

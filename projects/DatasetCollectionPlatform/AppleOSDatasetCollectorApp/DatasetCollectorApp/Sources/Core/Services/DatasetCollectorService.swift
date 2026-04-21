@@ -142,6 +142,133 @@ final class DatasetCollectorService {
         try store.exportDirectory()
     }
 
+    func registerVideoSample(
+        videoURL: URL,
+        activeSession: CollectorSessionRecord,
+        clubType: String,
+        handedness: String,
+        swingIntensity: String,
+        depthSamples: [DepthSample],
+        lidarCalibration: LiDARCalibrationData?
+    ) throws -> [CollectorSampleRecord] {
+        let videoData = try Data(contentsOf: videoURL)
+        let hash = sha256Hex(videoData)
+        let metadata = CollectorSampleMetadata(
+            fps: activeSession.captureConfig.fps,
+            resolution: activeSession.captureConfig.resolution,
+            clubType: clubType,
+            handedness: handedness,
+            swingIntensity: swingIntensity,
+            surface: activeSession.environment.sceneType
+        )
+
+        var registered: [CollectorSampleRecord] = []
+        let existing = try store.readRecords(CollectorSampleRecord.self, from: store.samplesFileURL)
+        let shotId = "shot_\(UUID().uuidString.prefix(8))"
+
+        for domain in [DatasetDomain.humanClub, DatasetDomain.golfBallDetection] {
+            guard activeSession.targetDomains.contains(domain.rawValue) else { continue }
+
+            if let matched = existing.first(where: { $0.domain == domain.rawValue && $0.sha256 == hash && $0.status == "active" }) {
+                let duplicate = CollectorDuplicateRecord(
+                    duplicateAt: DatasetCollectorDateFormatter.nowISO8601(),
+                    domain: domain.rawValue,
+                    sha256: hash,
+                    incomingFile: videoURL.lastPathComponent,
+                    incomingSourcePath: "ios://capture/\(activeSession.sessionId)/\(shotId)",
+                    existingSampleId: matched.sampleId,
+                    sessionId: activeSession.sessionId,
+                    collector: activeSession.collector,
+                    metadata: metadata
+                )
+                try store.append(duplicate, to: store.duplicatesFileURL)
+                continue
+            }
+
+            let assetURL = try writeAsset(
+                data: videoData,
+                domain: domain,
+                hash: hash,
+                fileExtension: "mov"
+            )
+
+            // Save LiDAR calibration alongside video if available
+            if let calibration = lidarCalibration {
+                let calibrationURL = assetURL.deletingPathExtension().appendingPathExtension("lidar.json")
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .prettyPrinted
+                let calibrationData = try encoder.encode(calibration)
+                try calibrationData.write(to: calibrationURL, options: .atomic)
+            }
+
+            // Save depth samples alongside video
+            if !depthSamples.isEmpty {
+                let depthURL = assetURL.deletingPathExtension().appendingPathExtension("depth.csv")
+                var csv = "timestamp,center_depth\n"
+                for sample in depthSamples {
+                    csv += "\(sample.timestamp),\(sample.centerDepth)\n"
+                }
+                try csv.write(to: depthURL, atomically: true, encoding: .utf8)
+            }
+
+            let sample = CollectorSampleRecord(
+                sampleId: "\(domain.rawValue)_\(hash.prefix(12))",
+                domain: domain.rawValue,
+                sha256: hash,
+                hashAlgorithm: "sha256",
+                assetPath: store.relativeExportPath(for: assetURL),
+                annotationPath: nil,
+                fileSize: videoData.count,
+                sessionId: activeSession.sessionId,
+                collector: activeSession.collector,
+                device: activeSession.device,
+                deviceProfile: activeSession.deviceProfile,
+                capturedAt: DatasetCollectorDateFormatter.nowISO8601(),
+                sourcePath: "ios://capture/\(activeSession.sessionId)/\(shotId)",
+                shotId: shotId,
+                takeIndex: registered.count,
+                tags: [clubType, handedness, swingIntensity],
+                metadata: metadata,
+                status: "active"
+            )
+            try store.append(sample, to: store.samplesFileURL)
+            registered.append(sample)
+        }
+
+        return registered
+    }
+
+    func loadAllSamples() throws -> [CollectorSampleRecord] {
+        try store.readRecords(CollectorSampleRecord.self, from: store.samplesFileURL)
+    }
+
+    func loadAllSessions() throws -> [CollectorSessionRecord] {
+        try store.readRecords(CollectorSessionRecord.self, from: store.sessionsFileURL)
+    }
+
+    func deleteSample(sampleId: String) throws {
+        let samples = try loadAllSamples()
+        guard let sample = samples.first(where: { $0.sampleId == sampleId }) else { return }
+        store.deleteAssetFile(at: sample.assetPath)
+        try store.rewriteRecords(CollectorSampleRecord.self, to: store.samplesFileURL) {
+            $0.sampleId == sampleId
+        }
+    }
+
+    func deleteSession(sessionId: String) throws {
+        let samples = try loadAllSamples()
+        let sessionSamples = samples.filter { $0.sessionId == sessionId }
+        for sample in sessionSamples {
+            store.deleteAssetFile(at: sample.assetPath)
+        }
+        try store.rewriteRecords(CollectorSampleRecord.self, to: store.samplesFileURL) {
+            $0.sessionId == sessionId
+        }
+        try store.rewriteRecords(CollectorSessionRecord.self, to: store.sessionsFileURL) {
+            $0.sessionId == sessionId
+        }
+    }
+
     private func writeAsset(data: Data, domain: DatasetDomain, hash: String, fileExtension: String) throws -> URL {
         try store.bootstrap()
         let firstTwo = String(hash.prefix(2))

@@ -18,9 +18,9 @@ final class DatasetCollectorViewModel: ObservableObject {
     @Published private(set) var statsSummary: String = "会话 0 / 样本 0 / 重复 0"
     @Published private(set) var exportPath: String = "未导出"
     @Published private(set) var logs: [String] = []
-    @Published private(set) var errorMessage: String?
+    @Published var errorMessage: String?
 
-    private let service: DatasetCollectorService
+    let service: DatasetCollectorService
     private var humanCounter = 0
     private var ballCounter = 0
 
