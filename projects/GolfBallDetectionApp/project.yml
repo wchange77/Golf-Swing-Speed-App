@@ -12,6 +12,10 @@ settings:
     TARGETED_DEVICE_FAMILY: "1"
     INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
 
+packages:
+  GolfAnalysisKit:
+    path: ../../packages/GolfAnalysisKit
+
 targets:
   GolfBallDetectionApp:
     type: application
@@ -19,6 +23,8 @@ targets:
     sources:
       - path: GolfBallDetectionApp/Sources
       - path: GolfBallDetectionApp/Resources
+    dependencies:
+      - package: GolfAnalysisKit
     info:
       path: GolfBallDetectionApp/Info.plist
       properties:

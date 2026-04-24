@@ -36,3 +36,6 @@ projects/DatasetCollectionPlatform/datasets/raw/**
 projects/DatasetCollectionPlatform/datasets/processed/**
 !projects/DatasetCollectionPlatform/datasets/raw/.gitkeep
 !projects/DatasetCollectionPlatform/datasets/processed/.gitkeep
+
+# Downloaded external repos (large, don't commit)
+projects/OpenSourceAnalysis/repos/

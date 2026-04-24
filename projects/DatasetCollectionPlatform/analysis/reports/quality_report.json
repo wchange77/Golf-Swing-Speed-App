@@ -1,12 +1,25 @@
 {
+  "generatedAt": "2026-04-23T23:26:52.779672+00:00",
   "summary": {
+    "sessions": 0,
     "activeSamples": 0,
     "duplicateEvents": 0,
-    "sessions": 0,
-    "duplicateRatio": 0.0
+    "missingAssets": 0,
+    "missingAssetIds": [],
+    "annotationCoverage": "0/0",
+    "annotationRate": 0
   },
   "byDomain": {},
-  "duplicateByDomain": {},
-  "sessionByDevice": {},
-  "domainSessionCoverage": {}
+  "metadata": {
+    "clubType": {},
+    "handedness": {},
+    "swingIntensity": {},
+    "surface": {}
+  },
+  "sessionDistribution": {
+    "count": 0,
+    "min": 0,
+    "max": 0,
+    "avg": 0.0
+  }
 }

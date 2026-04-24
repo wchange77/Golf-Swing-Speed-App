@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
-import sys
+import json
 from pathlib import Path
+
+from lib.registry import register_one_sample
+
+
+def load_extra_metadata(path: str) -> dict:
+    if not path:
+        return {}
+    meta_path = Path(path).resolve()
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Metadata json not found: {meta_path}")
+    payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Metadata json must be an object")
+    return payload
 
 
 def match_annotation(file: Path, annotation_dir: Path | None) -> Path | None:
@@ -44,41 +57,39 @@ def main() -> None:
     files = [p for p in input_dir.rglob("*") if p.is_file() and p.suffix.lower() in exts]
     files.sort()
 
+    metadata = {
+        "fps": args.fps,
+        "resolution": args.resolution,
+        "clubType": args.club_type,
+        "handedness": args.handedness,
+        "swingIntensity": args.swing_intensity,
+        "surface": args.surface,
+    }
+    metadata.update(load_extra_metadata(args.metadata_json))
+
+    registered = 0
+    duplicates = 0
     for f in files:
         ann = match_annotation(f, annotation_dir)
-        cmd = [
-            sys.executable,
-            "tools/register_sample.py",
-            "--domain",
-            args.domain,
-            "--file",
-            str(f),
-            "--session-id",
-            args.session_id,
-            "--collector",
-            args.collector,
-            "--shot-id",
-            f.stem,
-            "--fps",
-            str(args.fps),
-            "--resolution",
-            args.resolution,
-            "--club-type",
-            args.club_type,
-            "--handedness",
-            args.handedness,
-            "--swing-intensity",
-            args.swing_intensity,
-            "--surface",
-            args.surface,
-        ]
-        if ann:
-            cmd.extend(["--annotation", str(ann)])
-        if args.metadata_json:
-            cmd.extend(["--metadata-json", args.metadata_json])
-        subprocess.run(cmd, check=True)
+        sample_id = register_one_sample(
+            domain=args.domain,
+            source_file=f,
+            annotation_file=ann,
+            session_id=args.session_id,
+            collector=args.collector,
+            shot_id=f.stem,
+            take_index=1,
+            metadata=metadata,
+            source_path=str(f),
+        )
+        if sample_id:
+            registered += 1
+            print(f"REGISTERED {sample_id}")
+        else:
+            duplicates += 1
+            print(f"DUPLICATE {f.name}")
 
-    print(f"BATCH_DONE count={len(files)}")
+    print(f"BATCH_DONE registered={registered} duplicates={duplicates} total={len(files)}")
 
 
 if __name__ == "__main__":
