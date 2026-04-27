@@ -89,6 +89,12 @@ struct SpeedCalculationTests {
         #expect(0.3 < AppConstants.LagAnalysis.castingLRIThreshold)
     }
 
+    @Test("Dataset bridge loads current human club manifest")
+    func datasetBridgeLoadsCurrentManifest() {
+        #expect(HumanClubDatasetBridge.loadManifest() != nil)
+        #expect((HumanClubDatasetBridge.humanClubSampleCount() ?? -1) >= 0)
+    }
+
     @Test("Multi-frame regression matches expected speed")
     func multiFrameRegression() {
         let calibration = CalibrationSnapshot(

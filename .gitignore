@@ -27,6 +27,7 @@ Pods/
 *~
 __pycache__/
 *.pyc
+.gradle/
 
 # Xcode automatically generated (regenerate with xcodegen)
 # The .xcodeproj is generated from project.yml — don't commit it

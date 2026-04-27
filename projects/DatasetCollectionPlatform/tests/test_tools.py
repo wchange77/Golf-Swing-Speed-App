@@ -47,10 +47,14 @@ class TestStartSession:
     def test_creates_session(self, workspace):
         output = _run_in_workspace(workspace, "start_session.py", [
             "--collector", "tester",
+            "--session-name", "1",
             "--device", "TestDevice",
             "--scene-type", "indoor",
             "--lighting", "indoor_led",
             "--tripod",
+            "--latitude", "37.3318",
+            "--longitude", "-122.0312",
+            "--horizontal-accuracy-m", "3.5",
         ])
         session_id = output.splitlines()[-1]
         assert session_id.startswith("sess_")
@@ -60,7 +64,62 @@ class TestStartSession:
         lines = [json.loads(l) for l in sessions_file.read_text().strip().splitlines()]
         assert len(lines) == 1
         assert lines[0]["sessionId"] == session_id
+        assert lines[0]["sessionName"] == "1"
         assert lines[0]["collector"] == "tester"
+        assert lines[0]["location"]["source"] == "manual_cli"
+
+    def test_import_android_landing_gps(self, workspace):
+        session_id = _run_in_workspace(workspace, "start_session.py", [
+            "--collector", "landing_tester",
+            "--session-name", "7",
+            "--device", "TestDevice",
+            "--scene-type", "outdoor",
+            "--lighting", "sunlight",
+            "--tripod",
+            "--target-domains", "golf_ball_detection",
+        ]).splitlines()[-1]
+
+        sample_dir = workspace / "landing_samples"
+        sample_dir.mkdir()
+        sample_file = sample_dir / "ball.mov"
+        sample_file.write_bytes(b"landing-sample")
+        _run_in_workspace(workspace, "register_sample.py", [
+            "--domain", "golf_ball_detection",
+            "--file", str(sample_file),
+            "--session-id", session_id,
+            "--collector", "landing_tester",
+            "--shot-id", "shot_landing",
+        ])
+
+        android_jsonl = workspace / "landing_points.jsonl"
+        android_jsonl.write_text(json.dumps({
+            "sessionName": "7",
+            "capturedAt": "2026-04-24T00:00:00.000Z",
+            "source": "android_landing_point",
+            "device": "Xiaomi flagship",
+            "landingLocation": {
+                "latitude": 37.3318,
+                "longitude": -122.0312,
+                "horizontalAccuracyMeters": 2.4,
+                "altitudeMeters": 10.0,
+                "verticalAccuracyMeters": 3.0,
+                "capturedAt": "2026-04-24T00:00:00.000Z",
+                "source": "android_landing_point",
+            },
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        output = _run_in_workspace(workspace, "import_android_landing_gps.py", [
+            "--android-jsonl", str(android_jsonl),
+        ])
+        stats = json.loads(output)
+        assert stats["matchedRows"] == 1
+        assert stats["updatedSamples"] == 1
+
+        samples_file = workspace / "datasets" / "registry" / "samples.jsonl"
+        samples = [json.loads(l) for l in samples_file.read_text().strip().splitlines()]
+        measurement = samples[0]["metadata"]["referenceMeasurements"][0]
+        assert measurement["source"] == "android_landing_point"
+        assert measurement["landingLocation"]["horizontalAccuracyMeters"] == 2.4
 
 
 class TestEndToEnd:

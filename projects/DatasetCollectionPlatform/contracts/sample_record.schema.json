@@ -46,7 +46,41 @@
         "clubType": { "type": "string" },
         "handedness": { "type": "string", "enum": ["left", "right", "unknown"] },
         "swingIntensity": { "type": "string", "enum": ["warmup", "normal", "max", "unknown"] },
-        "surface": { "type": "string" }
+        "surface": { "type": "string" },
+        "referenceMeasurements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source", "capturedAt"],
+            "properties": {
+              "source": { "type": "string" },
+              "device": { "type": ["string", "null"] },
+              "capturedAt": { "type": "string", "format": "date-time" },
+              "clubSpeedMph": { "type": ["number", "null"], "minimum": 0 },
+              "ballSpeedMph": { "type": ["number", "null"], "minimum": 0 },
+              "carryDistanceMeters": { "type": ["number", "null"], "minimum": 0 },
+              "totalDistanceMeters": { "type": ["number", "null"], "minimum": 0 },
+              "launchAngleDegrees": { "type": ["number", "null"] },
+              "spinRateRpm": { "type": ["number", "null"], "minimum": 0 },
+              "landingLocation": {
+                "type": ["object", "null"],
+                "required": ["latitude", "longitude", "horizontalAccuracyMeters", "capturedAt", "source"],
+                "properties": {
+                  "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+                  "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+                  "horizontalAccuracyMeters": { "type": "number", "minimum": 0 },
+                  "altitudeMeters": { "type": ["number", "null"] },
+                  "verticalAccuracyMeters": { "type": ["number", "null"], "minimum": 0 },
+                  "capturedAt": { "type": "string", "format": "date-time" },
+                  "source": { "type": "string" }
+                },
+                "additionalProperties": false
+              },
+              "notes": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": true
     },

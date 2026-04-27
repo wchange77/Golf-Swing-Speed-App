@@ -27,17 +27,17 @@ actor YOLOBallDetector: BallDetector {
 
     init(config: Config = Config()) {
         self.config = config
-        loadModel()
+        self.model = Self.loadModel(config: config)
     }
 
-    private mutating func loadModel() {
+    private static func loadModel(config: Config) -> VNCoreMLModel? {
         guard let url = Bundle.main.url(
             forResource: config.modelName,
             withExtension: "mlmodelc"
-        ) else { return }
+        ) else { return nil }
 
-        guard let mlModel = try? MLModel(contentsOf: url) else { return }
-        self.model = try? VNCoreMLModel(for: mlModel)
+        guard let mlModel = try? MLModel(contentsOf: url) else { return nil }
+        return try? VNCoreMLModel(for: mlModel)
     }
 
     var isModelLoaded: Bool { model != nil }

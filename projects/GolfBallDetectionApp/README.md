@@ -2,6 +2,17 @@
 
 高尔夫球检测 iOS 应用（第二主项目）。
 
+> 状态：70%（代码完成，待 CoreML 模型 + 真机验证）
+> 阻塞：无训练好的 CoreML 模型（依赖 DatasetCollectionPlatform 产出数据后训练）
+
+## 已实现功能
+
+- YOLO CoreML 检测器集成（模型槽位就绪，待模型文件）
+- 相机管线 + 检测视图
+- 轨迹叠加（TrajectoryOverlayView）+ 飞行数据面板（FlightDataPanel）+ 视频回放（VideoReplayView）
+- 历史记录 + 洞察仪表盘
+- DatasetBridge 数据集桥接（15 Swift 文件）
+
 ## 目录
 
 - `GolfBallDetectionApp/Sources`：检测相关代码

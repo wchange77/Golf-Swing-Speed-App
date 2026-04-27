@@ -25,7 +25,7 @@ enum BallDatasetBridge {
             return envPath
         }
 
-        let candidates = [
+        let candidates = sourceRelativeManifestCandidates() + [
             "../DatasetCollectionPlatform/exports/consumers/golf_ball_detection_app.json",
             defaultRelativePath,
             "../../DatasetCollectionPlatform/exports/consumers/golf_ball_detection_app.json",
@@ -42,6 +42,18 @@ enum BallDatasetBridge {
         }
 
         return defaultRelativePath
+    }
+
+    private static func sourceRelativeManifestCandidates() -> [String] {
+        let sourceFile = URL(fileURLWithPath: #filePath)
+        let projectsDir = (0..<6).reduce(sourceFile) { url, _ in
+            url.deletingLastPathComponent()
+        }
+        let datasetRoot = projectsDir.appendingPathComponent("DatasetCollectionPlatform")
+        return [
+            datasetRoot.appendingPathComponent("exports/consumers/golf_ball_detection_app.json").path,
+            datasetRoot.appendingPathComponent("exports/dataset_manifest.json").path,
+        ]
     }
 
     static func loadManifest() -> SharedDatasetManifest? {

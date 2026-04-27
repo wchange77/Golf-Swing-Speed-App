@@ -129,7 +129,7 @@ struct SummaryCard: View {
         VStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.title3)
-                .foregroundStyle(.accentColor)
+                .foregroundStyle(Color.accentColor)
             Text(value)
                 .font(.system(.title3, design: .rounded, weight: .semibold))
             Text(title)

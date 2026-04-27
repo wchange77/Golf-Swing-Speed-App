@@ -97,11 +97,15 @@ DatasetCollectionPlatform（本项目）
 ```bash
 python tools/start_session.py \
   --collector "alice" \
+  --session-name "1" \
   --device "iPhone17ProMax" \
   --scene-type indoor \
   --lighting indoor_led \
   --tripod \
   --distance-m 4.0 \
+  --latitude 37.3318 \
+  --longitude -122.0312 \
+  --horizontal-accuracy-m 3.5 \
   --target-domains "human_club,golf_ball_detection" \
   --notes "室内练习场，7号铁为主"
 ```
@@ -113,6 +117,7 @@ start_session.py 完整参数：
 | 参数 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--collector` | 是 | — | 采集者姓名 |
+| `--session-name` | 否 | `""` | 手动会话名称，现场建议使用 `1`、`2`、`3` 递增 |
 | `--device` | 是 | — | 设备型号 |
 | `--device-profile` | 否 | `iphone17max` | 设备配置文件名（`config/device_profiles/` 下） |
 | `--fps` | 否 | `240` | 采集帧率 |
@@ -121,6 +126,9 @@ start_session.py 完整参数：
 | `--lighting` | 否 | `indoor_led` | 光照条件 |
 | `--tripod` | 否 | `false` | 是否使用三脚架 |
 | `--distance-m` | 否 | `0` | 相机到击球位距离（米） |
+| `--latitude` / `--longitude` | 否 | — | 当前录制设备 GPS 坐标，必须成对提供 |
+| `--horizontal-accuracy-m` | 否 | `0` | GPS 水平精度（米） |
+| `--altitude-m` / `--vertical-accuracy-m` | 否 | — | GPS 海拔与垂直精度（米） |
 | `--target-domains` | 否 | `human_club,golf_ball_detection` | 目标域（逗号分隔） |
 | `--notes` | 否 | `""` | 备注 |
 
@@ -242,6 +250,21 @@ python tools/import_ios_export.py --ios-export-dir /path/to/DatasetCollectorExpo
 
 同路径 A 的第 3-5 步（切分 → 导出 → 校验）。
 
+### 路径 C：Android 落球点 GPS → 导入
+
+适用于 Android 手机走到落球点后记录高精度 GPS，作为数据集参考测量保存。
+
+1. 打开 `AndroidLandingGpsCollector`，输入与 iOS/CLI 相同的会话名称（如 `1`）。
+2. 等待高精度 GPS，点击“记录落球点”。
+3. 导出 `landing_points.jsonl`。
+4. 在平台导入：
+
+```bash
+python tools/import_android_landing_gps.py --android-jsonl /path/to/landing_points.jsonl
+```
+
+导入后会按 `sessionName` 找到对应会话，并把落点 GPS 追加到该会话样本的 `metadata.referenceMeasurements`。若同名会话不唯一，导入工具会跳过，避免把参考数据写错样本。
+
 ---
 
 ## 数据契约（Schema）
@@ -252,11 +275,15 @@ python tools/import_ios_export.py --ios-export-dir /path/to/DatasetCollectorExpo
 
 必填字段：`sessionId`(sess_开头12位)、`collector`、`device`、`deviceProfile`、`createdAt`(ISO 8601)、`status`(active/closed)、`captureConfig`(fps+resolution)、`environment`(sceneType+lighting+tripod)、`targetDomains`(数组)
 
+可选字段：`sessionName`（现场手动名称）、`location`（当前录制设备 GPS）
+
 ### 样本记录 (sample_record.schema.json)
 
 必填字段：`sampleId`、`domain`(human_club/golf_ball_detection)、`sha256`(64位hex)、`hashAlgorithm`(sha256)、`assetPath`、`fileSize`、`sessionId`、`collector`、`device`、`deviceProfile`、`capturedAt`、`sourcePath`、`status`(active/archived)
 
-可选字段：`annotationPath`、`shotId`、`takeIndex`(≥1)、`tags`(数组)、`metadata`(fps/resolution/clubType/handedness/swingIntensity/surface)
+可选字段：`annotationPath`、`shotId`、`takeIndex`(≥1)、`tags`(数组)、`metadata`(fps/resolution/clubType/handedness/swingIntensity/surface/referenceMeasurements)
+
+参考测量必须保存：测速评估、精度回归和数据集复核依赖 `metadata.referenceMeasurements`，其中可包含雷达/发射监测仪读数、LiDAR/Depth sidecar 关联信息、Android 落球点 GPS 等。
 
 ---
 
@@ -282,6 +309,7 @@ python tools/import_ios_export.py --ios-export-dir /path/to/DatasetCollectorExpo
 | `validate_registry.py` | Schema 校验注册表 |
 | `dataset_stats.py` | 数据集统计概览（按域/球杆/惯用手/强度/场地分布） |
 | `import_ios_export.py` | 导入 iOS 采集端导出数据 |
+| `import_android_landing_gps.py` | 导入 Android 落球点 GPS 到样本参考测量 |
 | `validate_apple_project.py` | 校验 iOS 工程结构 |
 | `simulate_ios_workflow.py` | 模拟端到端集成测试 |
 
@@ -373,4 +401,3 @@ python tools/simulate_ios_workflow.py
 - [ ] 切分数据集（`split_dataset.py`）
 - [ ] 生成清单和质量报告（`generate_manifest.py` + `generate_quality_report.py`）
 - [ ] 检查质量报告中的缺失资产和标注覆盖率
-

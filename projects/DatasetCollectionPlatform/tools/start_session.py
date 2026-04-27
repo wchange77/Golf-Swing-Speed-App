@@ -29,6 +29,7 @@ def resolve_profile_path(profile_arg: str) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Start a dataset collection session")
     parser.add_argument("--collector", required=True)
+    parser.add_argument("--session-name", default="")
     parser.add_argument("--device", required=True)
     parser.add_argument("--device-profile", default="iphone17max")
     parser.add_argument("--ios-version", default="")
@@ -39,6 +40,12 @@ def main() -> None:
     parser.add_argument("--lighting", default="indoor_led")
     parser.add_argument("--tripod", action="store_true")
     parser.add_argument("--distance-m", type=float, default=0.0)
+    parser.add_argument("--latitude", type=float)
+    parser.add_argument("--longitude", type=float)
+    parser.add_argument("--horizontal-accuracy-m", type=float, default=0.0)
+    parser.add_argument("--altitude-m", type=float)
+    parser.add_argument("--vertical-accuracy-m", type=float)
+    parser.add_argument("--location-source", default="manual_cli")
     parser.add_argument("--target-domains", default="human_club,golf_ball_detection")
     parser.add_argument("--notes", default="")
     args = parser.parse_args()
@@ -58,6 +65,20 @@ def main() -> None:
     }
     if args.distance_m > 0:
         environment["distanceMeters"] = args.distance_m
+    has_location = args.latitude is not None or args.longitude is not None
+    if has_location and (args.latitude is None or args.longitude is None):
+        raise ValueError("--latitude and --longitude must be provided together")
+    location = None
+    if has_location:
+        location = {
+            "latitude": args.latitude,
+            "longitude": args.longitude,
+            "horizontalAccuracyMeters": max(args.horizontal_accuracy_m, 0.0),
+            "altitudeMeters": args.altitude_m,
+            "verticalAccuracyMeters": args.vertical_accuracy_m,
+            "capturedAt": utc_now_iso(),
+            "source": args.location_source,
+        }
 
     record = {
         "sessionId": session_id,
@@ -74,6 +95,10 @@ def main() -> None:
         "profileSnapshot": profile,
         "notes": args.notes,
     }
+    if args.session_name.strip():
+        record["sessionName"] = args.session_name.strip()
+    if location:
+        record["location"] = location
     validate_with_schema(record, SESSION_SCHEMA_FILE)
     append_jsonl(SESSIONS_FILE, record)
     print(session_id)
