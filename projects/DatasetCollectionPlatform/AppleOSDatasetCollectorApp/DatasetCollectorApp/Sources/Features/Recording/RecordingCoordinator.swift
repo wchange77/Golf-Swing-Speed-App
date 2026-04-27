@@ -19,6 +19,17 @@ final class RecordingCoordinator {
         var clubType: String = "driver"
         var handedness: String = "right"
         var swingIntensity: String = "normal"
+        var surface: String = "mat"
+        var cameraHeightMeters: Double = 1.0
+        var cameraAngleDegrees: Double = 0.0
+        var referenceDevice: String = ""
+        var radarClubSpeedMph: String = ""
+        var radarBallSpeedMph: String = ""
+        var carryDistanceMeters: String = ""
+        var totalDistanceMeters: String = ""
+        var launchAngleDegrees: String = ""
+        var spinRateRpm: String = ""
+        var referenceNotes: String = ""
     }
 
     private(set) var state: State = .guidanceStep1
@@ -27,6 +38,7 @@ final class RecordingCoordinator {
     private(set) var recordingDuration: TimeInterval = 0
     private(set) var humanDetected = false
     private(set) var lidarCalibration: LiDARCalibrationData?
+    private(set) var referenceMeasurementsSnapshot: [CollectorReferenceMeasurement] = []
 
     var metadata = RecordingMetadata()
 
@@ -54,7 +66,8 @@ final class RecordingCoordinator {
     }
 
     func startRecording() {
-        guard state == .guidanceStep3 else { return }
+        guard state == .guidanceStep3, metadataIsComplete else { return }
+        referenceMeasurementsSnapshot = makeReferenceMeasurements(capturedAt: DatasetCollectorDateFormatter.nowISO8601())
         state = .countdown(countdownSeconds)
         countdownTask = Task {
             for i in stride(from: countdownSeconds, through: 1, by: -1) {
@@ -83,6 +96,7 @@ final class RecordingCoordinator {
         recordedVideoURL = nil
         recordingDuration = 0
         humanDetected = false
+        referenceMeasurementsSnapshot = []
     }
 
     func retryRecording() {
@@ -92,6 +106,7 @@ final class RecordingCoordinator {
         validationResult = nil
         recordedVideoURL = nil
         recordingDuration = 0
+        referenceMeasurementsSnapshot = []
     }
 
     func setHumanDetected(_ detected: Bool) {
@@ -100,6 +115,84 @@ final class RecordingCoordinator {
 
     func setLiDARCalibration(_ calibration: LiDARCalibrationData?) {
         lidarCalibration = calibration
+    }
+
+    var referenceMeasurements: [CollectorReferenceMeasurement] {
+        if !referenceMeasurementsSnapshot.isEmpty {
+            return referenceMeasurementsSnapshot
+        }
+        return makeReferenceMeasurements(capturedAt: DatasetCollectorDateFormatter.nowISO8601())
+    }
+
+    private func makeReferenceMeasurements(capturedAt: String) -> [CollectorReferenceMeasurement] {
+        let clubSpeed = parseOptionalDouble(metadata.radarClubSpeedMph)
+        let ballSpeed = parseOptionalDouble(metadata.radarBallSpeedMph)
+        let carryDistance = parseOptionalDouble(metadata.carryDistanceMeters)
+        let totalDistance = parseOptionalDouble(metadata.totalDistanceMeters)
+        let launchAngle = parseOptionalDouble(metadata.launchAngleDegrees)
+        let spinRate = parseOptionalDouble(metadata.spinRateRpm)
+        let device = metadata.referenceDevice.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = metadata.referenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasReference = [
+            clubSpeed,
+            ballSpeed,
+            carryDistance,
+            totalDistance,
+            launchAngle,
+            spinRate
+        ].contains { $0 != nil } || !device.isEmpty || !notes.isEmpty
+        guard hasReference else { return [] }
+
+        let source = device.localizedCaseInsensitiveContains("trackman")
+            ? "trackman_manual"
+            : "radar_or_launch_monitor_manual"
+        return [
+            CollectorReferenceMeasurement(
+                source: source,
+                device: device.isEmpty ? nil : device,
+                capturedAt: capturedAt,
+                clubSpeedMph: clubSpeed,
+                ballSpeedMph: ballSpeed,
+                carryDistanceMeters: carryDistance,
+                totalDistanceMeters: totalDistance,
+                launchAngleDegrees: launchAngle,
+                spinRateRpm: spinRate,
+                landingLocation: nil,
+                notes: notes.isEmpty ? nil : notes
+            )
+        ]
+    }
+
+    var metadataIsComplete: Bool {
+        let required = [
+            metadata.clubType,
+            metadata.handedness,
+            metadata.swingIntensity,
+            metadata.surface
+        ]
+        guard required.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0 != "unknown" }) else {
+            return false
+        }
+        return metadata.cameraHeightMeters > 0 && metadata.cameraAngleDegrees >= -45 && metadata.cameraAngleDegrees <= 45
+    }
+
+    func canStartRecording(session: CollectorSessionRecord?) -> Bool {
+        guard metadataIsComplete, let session else { return false }
+        guard !session.environment.sceneType.isEmpty,
+              !session.environment.lighting.isEmpty,
+              session.environment.tripod,
+              let distance = session.environment.distanceMeters else {
+            return false
+        }
+        return distance >= 3.0 && distance <= 5.0
+    }
+
+    private func parseOptionalDouble(_ text: String) -> Double? {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        guard !normalized.isEmpty else { return nil }
+        return Double(normalized)
     }
 
     private func beginCapture() {

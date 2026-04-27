@@ -5,7 +5,7 @@
 ## v2 功能
 
 ### 采集流程
-1. 创建采集会话（`sessions.jsonl`）。
+1. 创建采集会话（手动命名如 `1`、`2`、`3`，并写入当前 GPS 到 `sessions.jsonl`）。
 2. 三步引导录制：摆放手机 → 确认人在画面 → 确认参数 → 倒计时录制。
 3. 录制后自动质量验证（帧数、时长、帧率稳定性、人体检测、清晰度、亮度）。
 4. 登记样本并按 SHA-256 去重（`samples.jsonl` + `duplicates.jsonl`）。
@@ -34,7 +34,7 @@
 | 轮廓检测 | VNDetectContoursRequest | 边缘轮廓（人体+球杆形态）|
 
 ### 技术要点
-- 240fps @ 1080p 高速录制，支持 LiDAR 深度数据同步采集。
+- 240fps @ 1080p 高速录制，保留 LiDAR/Depth sidecar 与雷达/发射监测仪参考读数，供后续测速精度测试和数据集复核使用。
 - 回放使用自定义 AVPlayerLayer（非 SwiftUI VideoPlayer），确保骨架叠加精确对齐。
 - Vision 分析使用 `.up` 方向（AVAssetImageGenerator 已旋转帧）。
 - 清晰度验证使用直接像素 Laplacian 方差（适配 240fps 短曝光帧）。

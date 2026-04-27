@@ -23,10 +23,15 @@ targets:
       path: DatasetCollectorApp/Info.plist
       properties:
         UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         NSPhotoLibraryUsageDescription: "Dataset Collector needs access to photo library for dataset export/import."
         NSPhotoLibraryAddUsageDescription: "Dataset Collector needs permission to export captured dataset files."
         NSCameraUsageDescription: "Dataset Collector needs camera access to capture dataset samples."
         NSMicrophoneUsageDescription: "Dataset Collector may use microphone for audio-triggered recording."
+        NSLocationWhenInUseUsageDescription: "Dataset Collector records GPS coordinates for each collection session."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wchange77.DatasetCollectorApp

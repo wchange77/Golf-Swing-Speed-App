@@ -107,6 +107,19 @@ final class JSONLFileStore {
     }
 
     func deleteAssetFile(at relativePath: String) {
+        deleteExportFile(at: relativePath)
+    }
+
+    func deleteExportFile(at relativePath: String) {
+        let fullPath = exportFullPath(for: relativePath)
+        try? fileManager.removeItem(atPath: fullPath)
+    }
+
+    func exportFileExists(at relativePath: String) -> Bool {
+        fileManager.fileExists(atPath: exportFullPath(for: relativePath))
+    }
+
+    private func exportFullPath(for relativePath: String) -> String {
         let fullPath: String
         if relativePath.hasPrefix("ios_export/") {
             let suffix = String(relativePath.dropFirst("ios_export/".count))
@@ -114,6 +127,6 @@ final class JSONLFileStore {
         } else {
             fullPath = baseDirectory.appendingPathComponent(relativePath).path
         }
-        try? fileManager.removeItem(atPath: fullPath)
+        return fullPath
     }
 }

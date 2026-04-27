@@ -2,10 +2,15 @@ import SwiftUI
 
 struct DatasetCollectorView: View {
     @StateObject private var viewModel = DatasetCollectorViewModel()
+    @StateObject private var locationManager = DatasetLocationManager()
     @State private var selectedTab = 0
     @StateObject private var cameraManager = DatasetCameraManager()
     @State private var coordinator: RecordingCoordinator?
     @State private var registeredSampleIds: [String] = []
+    @State private var isSavingRecording = false
+    @State private var hasSavedRecording = false
+    @State private var saveStatusMessage: String?
+    @State private var saveErrorMessage: String?
     @State private var showPlaybackAnalysis = false
 
     var body: some View {
@@ -31,6 +36,7 @@ struct DatasetCollectorView: View {
         .onAppear {
             viewModel.refreshStats()
             viewModel.refreshExportPath()
+            locationManager.requestPermissionAndLocation()
         }
     }
 
@@ -40,6 +46,8 @@ struct DatasetCollectorView: View {
         NavigationStack {
             Form {
                 Section("会话配置") {
+                    TextField("会话名称（如 1、2、3）", text: $viewModel.sessionName)
+                        .keyboardType(.numbersAndPunctuation)
                     TextField("采集人", text: $viewModel.collector)
                     TextField("设备", text: $viewModel.device)
                     TextField("设备档案", text: $viewModel.deviceProfile)
@@ -48,24 +56,47 @@ struct DatasetCollectorView: View {
                     TextField("场景类型", text: $viewModel.sceneType)
                     TextField("光照", text: $viewModel.lighting)
                     Toggle("三脚架", isOn: $viewModel.tripod)
+                    TextField("相机距离（米）", value: $viewModel.distanceMeters, format: .number)
+                        .keyboardType(.decimalPad)
                     TextField("备注", text: $viewModel.notes, axis: .vertical)
                 }
 
                 Section("会话控制") {
                     Button("创建采集会话") {
-                        viewModel.createSession()
+                        locationManager.requestLocation()
+                        viewModel.createSession(location: locationManager.latestLocation)
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(!viewModel.canCreateSession || locationManager.latestLocation == nil)
+
+                    if !viewModel.canCreateSession {
+                        Text(viewModel.sessionValidationMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if locationManager.latestLocation == nil {
+                        Text("创建会话前必须获取当前 GPS 定位")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
 
                     if let session = viewModel.activeSession {
-                        Text("当前会话: \(session.sessionId)")
+                        Text("当前会话: \(session.sessionName ?? session.sessionId)")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if let location = session.location {
+                            Text(String(format: "GPS: %.6f, %.6f / 精度 %.1f 米", location.latitude, location.longitude, location.horizontalAccuracyMeters))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     } else {
                         Text("尚未创建会话")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+
+                    Text(locationManager.statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let error = viewModel.errorMessage {
@@ -107,6 +138,7 @@ struct DatasetCollectorView: View {
                                 try? cameraManager.configure()
                                 cameraManager.startSession()
                                 let coord = RecordingCoordinator(cameraManager: cameraManager)
+                                resetRecordingSaveState()
                                 coordinator = coord
                             } else {
                                 viewModel.errorMessage = "相机权限被拒绝，请在设置中开启"
@@ -129,40 +161,57 @@ struct DatasetCollectorView: View {
         } else {
             switch coordinator.state {
             case .guidanceStep1, .guidanceStep2, .guidanceStep3:
-                RecordingGuidanceView(coordinator: coordinator, cameraManager: cameraManager)
+                RecordingGuidanceView(
+                    coordinator: coordinator,
+                    cameraManager: cameraManager,
+                    session: viewModel.activeSession
+                )
             case .countdown, .recording, .validating:
                 DatasetRecordingView(coordinator: coordinator, cameraManager: cameraManager)
-            case .result(let passed):
+            case .result:
                 if let result = coordinator.validationResult {
                     RecordingResultView(
                         result: result,
                         registeredSampleIds: registeredSampleIds,
+                        referenceMeasurements: coordinator.referenceMeasurements,
+                        isSaving: isSavingRecording,
+                        hasSaved: hasSavedRecording,
+                        saveStatusMessage: saveStatusMessage,
+                        saveErrorMessage: saveErrorMessage,
                         videoURL: coordinator.recordedVideoURL,
-                        onRetry: { coordinator.retryRecording() },
+                        onSave: { saveRecordingSamples(coordinator: coordinator) },
+                        onRetry: {
+                            coordinator.retryRecording()
+                            resetRecordingSaveState()
+                        },
                         onDone: {
                             coordinator.reset()
                             self.coordinator = nil
                             cameraManager.stopSession()
+                            resetRecordingSaveState()
                         },
                         onPlaybackAnalysis: {
                             showPlaybackAnalysis = true
                         }
                     )
-                    .onAppear {
-                        if passed {
-                            registerSamples(coordinator: coordinator)
-                        }
-                    }
                 }
             }
         }
     }
 
-    private func registerSamples(coordinator: RecordingCoordinator) {
+    private func saveRecordingSamples(coordinator: RecordingCoordinator) {
+        guard !isSavingRecording, !hasSavedRecording else { return }
         guard let session = viewModel.activeSession,
-              let videoURL = coordinator.recordedVideoURL else { return }
+              let videoURL = coordinator.recordedVideoURL else {
+            saveErrorMessage = "缺少会话或录制视频，无法保存"
+            return
+        }
 
+        isSavingRecording = true
+        saveStatusMessage = nil
+        saveErrorMessage = nil
         Task {
+            defer { isSavingRecording = false }
             do {
                 let depthSamples = cameraManager.capturedDepthSamples
                 let samples = try viewModel.service.registerVideoSample(
@@ -171,15 +220,35 @@ struct DatasetCollectorView: View {
                     clubType: coordinator.metadata.clubType,
                     handedness: coordinator.metadata.handedness,
                     swingIntensity: coordinator.metadata.swingIntensity,
+                    surface: coordinator.metadata.surface,
+                    cameraHeightMeters: coordinator.metadata.cameraHeightMeters,
+                    cameraAngleDegrees: coordinator.metadata.cameraAngleDegrees,
+                    validationResult: coordinator.validationResult,
+                    captureTimestamps: cameraManager.capturedTimestamps,
                     depthSamples: depthSamples,
-                    lidarCalibration: coordinator.lidarCalibration
+                    lidarCalibration: coordinator.lidarCalibration,
+                    hasLiDAR: cameraManager.hasLiDAR,
+                    referenceMeasurements: coordinator.referenceMeasurements
                 )
                 registeredSampleIds = samples.map(\.sampleId)
+                hasSavedRecording = true
+                saveStatusMessage = samples.isEmpty
+                    ? "视频与已有样本重复，已记录重复项"
+                    : "已保存视频、质量记录和 TrackMan/参考数据"
                 viewModel.refreshStats()
             } catch {
+                saveErrorMessage = error.localizedDescription
                 viewModel.errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func resetRecordingSaveState() {
+        registeredSampleIds = []
+        isSavingRecording = false
+        hasSavedRecording = false
+        saveStatusMessage = nil
+        saveErrorMessage = nil
     }
 
     // MARK: - Tab 3: 数据

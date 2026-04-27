@@ -35,7 +35,7 @@ struct LiDARCalibrationData: Codable {
     let capturedAt: String
 }
 
-struct DepthSample {
+struct DepthSample: Codable {
     let timestamp: TimeInterval
     let centerDepth: Float
 }
@@ -120,6 +120,9 @@ final class DatasetCameraManager: NSObject, ObservableObject {
 
         captureSession.commitConfiguration()
 
+        videoDataOutput?.connection(with: .video)?.setDatasetCollectorLandscapeOrientation()
+        movieOutput?.connection(with: .video)?.setDatasetCollectorLandscapeOrientation()
+
         frameCollector.onHumanDetected = { [weak self] detected in
             self?.humanDetected = detected
         }
@@ -189,6 +192,8 @@ final class DatasetCameraManager: NSObject, ObservableObject {
         let fileName = "dataset_\(UUID().uuidString).mov"
         let url = tempDir.appendingPathComponent(fileName)
 
+        videoDataOutput?.connection(with: .video)?.setDatasetCollectorLandscapeOrientation()
+        movieOutput.connection(with: .video)?.setDatasetCollectorLandscapeOrientation()
         frameCollector.startCollecting()
         recordingURL = url
         movieOutput.startRecording(to: url, recordingDelegate: self)
@@ -220,6 +225,24 @@ final class DatasetCameraManager: NSObject, ObservableObject {
 
     static var isAuthorized: Bool {
         AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+    }
+}
+
+extension AVCaptureConnection {
+    func setDatasetCollectorLandscapeOrientation() {
+        guard isVideoOrientationSupported else { return }
+        let orientation = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.interfaceOrientation }
+            .first { $0 != .unknown }
+
+        switch orientation {
+        case .landscapeLeft:
+            videoOrientation = .landscapeLeft
+        case .landscapeRight:
+            videoOrientation = .landscapeRight
+        default:
+            videoOrientation = .landscapeRight
+        }
     }
 }
 

@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 final class DatasetCollectorViewModel: ObservableObject {
+    @Published var sessionName: String = "1"
     @Published var collector: String = "collector_a"
     @Published var device: String = "iPhone17Max"
     @Published var deviceProfile: String = "iphone17max"
@@ -13,6 +14,7 @@ final class DatasetCollectorViewModel: ObservableObject {
     @Published var sceneType: String = "indoor"
     @Published var lighting: String = "indoor_led"
     @Published var tripod: Bool = true
+    @Published var distanceMeters: Double = 4.0
 
     @Published private(set) var activeSession: CollectorSessionRecord?
     @Published private(set) var statsSummary: String = "会话 0 / 样本 0 / 重复 0"
@@ -24,14 +26,38 @@ final class DatasetCollectorViewModel: ObservableObject {
     private var humanCounter = 0
     private var ballCounter = 0
 
+    var canCreateSession: Bool {
+        sessionValidationMessage == "OK"
+    }
+
+    var sessionValidationMessage: String {
+        if sessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "会话名称不能为空" }
+        if collector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "采集人不能为空" }
+        if device.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "设备不能为空" }
+        if deviceProfile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "设备档案不能为空" }
+        if !["indoor", "outdoor", "mixed"].contains(sceneType) { return "场景类型必须是 indoor / outdoor / mixed" }
+        if lighting.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "光照不能为空" }
+        if !tripod { return "高质量采集必须使用三脚架" }
+        if distanceMeters < 3.0 || distanceMeters > 5.0 { return "相机距离需在 3-5 米" }
+        if fps < 120 { return "帧率需至少 120fps，推荐 240fps" }
+        if resolution.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "分辨率不能为空" }
+        return "OK"
+    }
+
     init(service: DatasetCollectorService = DatasetCollectorService()) {
         self.service = service
         refreshStats()
+        refreshSuggestedSessionName()
     }
 
-    func createSession() {
+    func createSession(location: CollectorLocation?) {
+        guard canCreateSession else {
+            setError(sessionValidationMessage)
+            return
+        }
         do {
             let request = CreateSessionRequest(
+                sessionName: sessionName,
                 collector: collector,
                 device: device,
                 deviceProfile: deviceProfile,
@@ -43,14 +69,16 @@ final class DatasetCollectorViewModel: ObservableObject {
                 sceneType: sceneType,
                 lighting: lighting,
                 tripod: tripod,
-                distanceMeters: nil,
+                distanceMeters: distanceMeters,
+                location: location,
                 targetDomains: [.humanClub, .golfBallDetection]
             )
             let session = try service.createSession(request)
             activeSession = session
-            appendLog("创建会话: \(session.sessionId)")
+            appendLog("创建会话: \(session.sessionName ?? session.sessionId)")
             refreshStats()
             refreshExportPath()
+            refreshSuggestedSessionName()
         } catch {
             setError(error.localizedDescription)
         }
@@ -88,6 +116,16 @@ final class DatasetCollectorViewModel: ObservableObject {
         }
     }
 
+    func refreshSuggestedSessionName() {
+        do {
+            let names = try service.loadAllSessions().compactMap { $0.sessionName }
+            let maxNumber = names.compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }.max() ?? 0
+            sessionName = "\(maxNumber + 1)"
+        } catch {
+            sessionName = "1"
+        }
+    }
+
     private func registerSample(domain: DatasetDomain, seed: String) {
         guard let activeSession else {
             setError(DatasetCollectorServiceError.noActiveSession.localizedDescription)
@@ -101,7 +139,21 @@ final class DatasetCollectorViewModel: ObservableObject {
             clubType: domain == .humanClub ? "driver" : "none",
             handedness: "right",
             swingIntensity: "normal",
-            surface: domain == .golfBallDetection ? "mat" : "unknown"
+            surface: domain == .golfBallDetection ? "mat" : "indoor",
+            sceneType: sceneType,
+            lighting: lighting,
+            tripod: tripod,
+            distanceMeters: distanceMeters,
+            shotPurpose: domain.rawValue,
+            qualityPassed: nil,
+            qualityScore: nil,
+            qualityFailedChecks: [],
+            actualFPS: nil,
+            frameCount: nil,
+            durationSeconds: nil,
+            captureOrientation: nil,
+            labelStatus: "mock",
+            sidecars: nil
         )
 
         do {

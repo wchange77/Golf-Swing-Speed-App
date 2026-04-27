@@ -6,6 +6,7 @@ struct DataBrowserView: View {
     @State private var sessions: [CollectorSessionRecord] = []
     @State private var selectedDomain: String? = nil
     @State private var selectedSession: String? = nil
+    @State private var selectedQuality: String? = nil
     @State private var showDeleteAlert = false
     @State private var sampleToDelete: CollectorSampleRecord?
     @State private var selectedSample: CollectorSampleRecord?
@@ -15,6 +16,20 @@ struct DataBrowserView: View {
         samples.filter { sample in
             if let domain = selectedDomain, sample.domain != domain { return false }
             if let session = selectedSession, sample.sessionId != session { return false }
+            if let selectedQuality {
+                switch selectedQuality {
+                case "passed":
+                    if sample.metadata.qualityPassed != true { return false }
+                case "failed":
+                    if sample.metadata.qualityPassed != false { return false }
+                case "needs_review":
+                    if sample.metadata.labelStatus != "needs_review" { return false }
+                case "export_ready":
+                    if !sample.isExportReady { return false }
+                default:
+                    break
+                }
+            }
             return true
         }
     }
@@ -64,6 +79,21 @@ struct DataBrowserView: View {
                 }
                 FilterChip(title: "球检测", isSelected: selectedDomain == "golf_ball_detection") {
                     selectedDomain = "golf_ball_detection"
+                }
+
+                Divider().frame(height: 20)
+
+                FilterChip(title: "待复核", isSelected: selectedQuality == "needs_review") {
+                    selectedQuality = selectedQuality == "needs_review" ? nil : "needs_review"
+                }
+                FilterChip(title: "合格", isSelected: selectedQuality == "passed") {
+                    selectedQuality = selectedQuality == "passed" ? nil : "passed"
+                }
+                FilterChip(title: "不合格", isSelected: selectedQuality == "failed") {
+                    selectedQuality = selectedQuality == "failed" ? nil : "failed"
+                }
+                FilterChip(title: "可导出", isSelected: selectedQuality == "export_ready") {
+                    selectedQuality = selectedQuality == "export_ready" ? nil : "export_ready"
                 }
 
                 Divider().frame(height: 20)
@@ -180,6 +210,7 @@ private struct SampleRowView: View {
                 HStack(spacing: 8) {
                     Label(sample.metadata.clubType, systemImage: "sportscourt")
                     Label(sample.metadata.handedness == "right" ? "右手" : "左手", systemImage: "hand.raised")
+                    Label(qualityLabel, systemImage: qualityIcon)
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -210,5 +241,25 @@ private struct SampleRowView: View {
 
     private func formatDate(_ iso: String) -> String {
         String(iso.prefix(16).replacingOccurrences(of: "T", with: " "))
+    }
+
+    private var qualityLabel: String {
+        if sample.metadata.labelStatus == "needs_review" {
+            return sample.isExportReady ? "可导出" : "待复核"
+        }
+        guard let passed = sample.metadata.qualityPassed else {
+            return "未验证"
+        }
+        return passed ? "合格" : "不合格"
+    }
+
+    private var qualityIcon: String {
+        if sample.metadata.labelStatus == "needs_review" {
+            return sample.isExportReady ? "square.and.arrow.up" : "tag"
+        }
+        guard let passed = sample.metadata.qualityPassed else {
+            return "questionmark.circle"
+        }
+        return passed ? "checkmark.seal" : "exclamationmark.triangle"
     }
 }
