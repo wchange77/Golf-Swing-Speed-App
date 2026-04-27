@@ -1,0 +1,55 @@
+name: DatasetCollectorApp
+options:
+  bundleIdPrefix: com.wchange77
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.4"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1"
+    INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+
+targets:
+  DatasetCollectorApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: DatasetCollectorApp/Sources
+      - path: DatasetCollectorApp/Resources
+    info:
+      path: DatasetCollectorApp/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSPhotoLibraryUsageDescription: "Dataset Collector needs access to photo library for dataset export/import."
+        NSPhotoLibraryAddUsageDescription: "Dataset Collector needs permission to export captured dataset files."
+        NSCameraUsageDescription: "Dataset Collector needs camera access to capture dataset samples."
+        NSMicrophoneUsageDescription: "Dataset Collector may use microphone for audio-triggered recording."
+        NSLocationWhenInUseUsageDescription: "Dataset Collector records GPS coordinates for each collection session."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wchange77.DatasetCollectorApp
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "G335FJTJ35"
+        CODE_SIGN_STYLE: Automatic
+    entitlements:
+      path: DatasetCollectorApp/DatasetCollectorApp.entitlements
+
+  DatasetCollectorAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: DatasetCollectorApp/Tests/Unit
+    dependencies:
+      - target: DatasetCollectorApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wchange77.DatasetCollectorAppTests
+        GENERATE_INFOPLIST_FILE: "YES"

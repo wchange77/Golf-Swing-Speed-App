@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://golf-swing-speed-app.local/contracts/dataset-manifest.schema.json",
+  "title": "Dataset Manifest",
+  "type": "object",
+  "required": ["version", "generatedAt", "registry", "contracts", "datasets", "consumers"],
+  "properties": {
+    "version": { "type": "string" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "registry": {
+      "type": "object",
+      "required": ["samplesFile", "duplicatesFile", "sessionsFile", "uniqueSamples", "duplicateSamples"],
+      "properties": {
+        "samplesFile": { "type": "string" },
+        "duplicatesFile": { "type": "string" },
+        "sessionsFile": { "type": "string" },
+        "uniqueSamples": { "type": "integer", "minimum": 0 },
+        "duplicateSamples": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "required": ["session", "sample", "manifest"],
+      "properties": {
+        "session": { "type": "string" },
+        "sample": { "type": "string" },
+        "manifest": { "type": "string" }
+      }
+    },
+    "datasets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "path", "samples", "format", "split", "splitFile"],
+        "properties": {
+          "key": { "type": "string" },
+          "path": { "type": "string" },
+          "samples": { "type": "integer", "minimum": 0 },
+          "format": { "type": "string" },
+          "duplicateFiltered": { "type": "integer", "minimum": 0 },
+          "splitFile": { "type": "string" },
+          "split": {
+            "type": "object",
+            "required": ["train", "val", "test"],
+            "properties": {
+              "train": { "type": "integer", "minimum": 0 },
+              "val": { "type": "integer", "minimum": 0 },
+              "test": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "consumers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["consumer", "manifestPath", "domains"],
+        "properties": {
+          "consumer": { "type": "string" },
+          "manifestPath": { "type": "string" },
+          "domains": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["human_club", "golf_ball_detection"] }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

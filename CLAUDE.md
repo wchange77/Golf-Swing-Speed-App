@@ -1,142 +1,159 @@
-# CLAUDE.md — Golf Swing Speed App
+# CLAUDE.md
 
-## Project Overview
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Golf Swing Speed App is an iPhone app that measures golf club head speed using the device's built-in LiDAR scanner and 240fps camera — with no external hardware required. It targets speed training golfers who want instant, free swing speed feedback.
+## 项目概述
 
-**Status:** Active development — Phase 2-4 feature complete (V0.02.10)
-**Platform:** iOS (iPhone 12 Pro and later — LiDAR required)
-**Language:** Swift
-**UI Framework:** SwiftUI
+高尔夫挥杆测速系统，四主项目 + 一个共享 Swift Package 架构，执行顺序遵循"数据先行"原则。
 
-## Architecture
+## 项目结构
 
-### Stack
-| Component | Technology |
-|---|---|
-| Language | Swift |
-| UI | SwiftUI |
-| Camera | AVFoundation (240fps capture) |
-| LiDAR/Depth | ARKit / RealityKit |
-| Computer Vision | Vision framework, Core ML (custom YOLO model) |
-| ML Training | Create ML / PyTorch → Core ML export |
-| Audio Detection | AVAudioEngine / Accelerate framework |
-| Audio Feedback | AVAudioPlayer (beeps), Core Haptics (CHHapticEngine) |
-| Speech Output | AVSpeechSynthesizer (voice alerts + speed readout) |
-| Body Pose | Vision (VNDetectHumanBodyPoseRequest) or MediaPipe Pose |
-| Data Storage | SwiftData |
+1. **DatasetCollectionPlatform** (`projects/DatasetCollectionPlatform/`) — 数据采集/去重/切分/导出平台（当前主焦点），含 Python 工具链 + iOS 采集端
+2. **HumanClubAnalysisApp** (`projects/HumanClubAnalysisApp/`) — 人体+球杆分析 iOS App（速度/姿态/挥杆链路）
+3. **GolfBallDetectionApp** (`projects/GolfBallDetectionApp/`) — 高尔夫球检测+轨迹 iOS App
+4. **PiTracIPhoneFeasibilityStudy** (`projects/PiTracIPhoneFeasibilityStudy/`) — PiTrac 在 iPhone 上复现可行性分析
+5. **GolfAnalysisKit** (`packages/GolfAnalysisKit/`) — 共享 Swift Package，两个 App 共同依赖
 
-### Core Pipeline
-1. **Audio monitoring** (idle) → detect swing onset via whoosh sound
-2. **240fps capture** triggered by audio → record full swing arc (minimal real-time processing)
-3. **Post-capture analysis** on every frame (~240-360 frames, ~4-15 seconds processing):
-   - 3D body pose (`VNDetectHumanBodyPose3DRequest`) on all frames at full 240fps
-   - Club head detection (YOLO) + tracking (optical flow + Kalman) on all frames
-   - Speed calculation using LiDAR-calibrated 3D positions
-   - Lag angle calculation in true 3D at full temporal resolution
-   - Release point detection to ±4ms / ±1-2° precision
-4. **Impact speed extraction** from calibrated impact zone position
-5. **Audio feedback** of speed + lag analysis results
+数据流向：DatasetCollectionPlatform 产出数据 → 两个 App 通过 consumer manifest 消费 → PiTrac 研究最后做。
 
-### Key Directories
-```
-GolfSwingSpeedApp/
-├── App/                    — App entry point, navigation, onboarding
-├── Features/
-│   ├── Calibration/        — Manual (timer + photo) + LiDAR calibration
-│   ├── Capture/            — 240fps camera, swing state machine, capture coordinator
-│   ├── Tracking/           — Optical flow, Kalman filter, tracking pipeline
-│   ├── SpeedCalc/          — Speed calculation, swing plane correction, adaptive sampling
-│   ├── AudioDetection/     — Swing detection via microphone
-│   ├── LagAnalysis/        — 3D body pose lag angle analysis
-│   ├── FrameAnalysis/      — Manual frame-by-frame viewer
-│   ├── History/            — Swing data storage, charts, stats
-│   ├── Onboarding/         — First-launch tutorial
-│   └── Settings/
-├── Managers/               — Audio feedback, permissions
-├── Models/                 — Data models, SwiftData schemas
-├── ML/                     — Core ML models (future)
-├── Utilities/              — Constants, extensions
-└── GolfSwingSpeedAppTests/ — 44+ unit tests across 6 suites
+## 平台要求
+
+- iOS 部署目标：17.0
+- Swift：5.9
+- Xcode：16.4
+- XcodeGen：所有 iOS 工程从 `project.yml` 生成 `.xcodeproj`（已 gitignore，不提交）
+- Python：3.x，依赖见 `projects/DatasetCollectionPlatform/requirements.txt`（jsonschema, PyYAML, requests）
+
+## 常用命令
+
+### 数据平台（Python）
+
+```bash
+cd projects/DatasetCollectionPlatform
+pip install -r requirements.txt
+
+# 数据闭环全链路
+python tools/start_session.py --collector "alice" --device "iPhone17Max" ...
+python tools/register_sample.py --domain human_club --file <path> --session-id <id> ...
+python tools/register_batch.py --domain golf_ball_detection --input-dir <dir> ...
+python tools/split_dataset.py --domain human_club --strategy session --seed 42
+python tools/generate_manifest.py
+python tools/generate_quality_report.py
+python tools/validate_registry.py --strict
+
+# AppleOS 工程校验（无需 Mac/Xcode）
+python tools/validate_apple_project.py
+# 模拟 iOS 采集全链路
+python tools/simulate_ios_workflow.py
 ```
 
-## Coding Conventions
+### iOS 工程（Swift/Xcode）
 
-- Swift 5.9+, iOS 17.0+ minimum deployment target
-- SwiftUI for all UI, no UIKit unless required for camera/AR views
-- Use async/await for all asynchronous operations
-- Use Swift concurrency (actors) for thread-safe sensor data
-- Prefer value types (structs) over classes where possible
-- All measurements in SI units (metres, seconds) internally; convert to mph/kmh for display only
-- Camera pipeline uses CMSampleBuffer → CVPixelBuffer → CIImage flow
-- Core ML models stored in ML/ directory with .mlmodel extension
-- Use #Preview macros for SwiftUI previews
+```bash
+# 生成任一工程（始终从 project.yml 重新生成）
+cd projects/DatasetCollectionPlatform/AppleOSDatasetCollectorApp
+xcodegen generate --spec project.yml
 
-## Key Technical Decisions
+cd projects/HumanClubAnalysisApp
+xcodegen generate --spec project.yml
 
-- **240fps at 1080p** is the capture target (max available on iPhone)
-- **Hybrid tracking:** YOLO detection for slow frames + optical flow + Kalman filter for fast frames
-- **Audio-triggered capture** to reduce battery/thermal impact vs continuous recording
-- **LiDAR for calibration only** (60Hz too slow for 240fps tracking) — establishes pixel-to-metre scale
-- **Address position calibration** — while golfer is static at address, combine Apple 3D body pose + LiDAR + CV to measure: club length, lie angle, shaft plane, arm length, ball position. These become Kalman filter constraints during tracking (club head must be within club_length of wrist, approximately in swing plane)
-- **Post-capture processing** — all heavy analysis runs AFTER swing completes. No real-time constraints
-- **Adaptive frame sampling** — not all swing phases need 240fps analysis. Late downswing → impact gets full 240fps; backswing and follow-through processed at 30-60fps. Two-pass approach: fast phase detection pass at ~30fps, then targeted full analysis on critical frames. Reduces processing by ~45%
-- **Future: learned inference model** — as the app builds a dataset of fully-analysed swings, train an ML model that predicts speed/lag/release from sparse inputs (fewer frames + audio + calibration). Goal: near-instant results from minimal data, with full pipeline as verification mode
-- **v1 scope: club head speed + lag angle analysis** — no ball tracking, face angle, spin, or other launch monitor metrics
-- **Lag angle detection** via MediaPipe/Vision body pose + club shaft tracking. Reports: Lag Retention Index, Release Point, Shaft Lean at Impact, casting detection
-- **Audio feedback system** with two modes: Beep Mode (low-latency tones) and Voice Mode (AVSpeechSynthesizer). Routes to AirPods/Bluetooth automatically
+cd projects/GolfBallDetectionApp
+xcodegen generate --spec project.yml
+```
 
-## Research References
+### GolfAnalysisKit 测试
 
-- `RESEARCH.md` — Full competitive and technology research
-- `RESEARCH_PLAN.md` — Research methodology and scope
-- `README.md` — Project overview and goals
+```bash
+cd packages/GolfAnalysisKit
+swift test
+# 单个测试
+swift test --filter GolfAnalysisKitTests.BallTrackingTests
+```
 
-## Accuracy Targets
+测试文件在 `Tests/GolfAnalysisKitTests/`，覆盖：BallTracking、FrameDifferenceBallDetector、KalmanFilter2D、Session、Trajectory。
 
-| Version | Target Accuracy | Approach |
-|---|---|---|
-| v1.0 | ±5-8 mph | Basic frame-to-frame tracking |
-| v1.1 | ±2-4 mph | + Sub-pixel tracking + motion blur velocity estimation + Kalman smoothing |
-| v2.0 | ±1-3 mph | + Trained ML model + sensor fusion + optional reflective marker |
+### YOLO 球检测模型训练
 
-**Key:** 1-pixel position error ≈ 0.6 mph speed error. Consistency matters more than absolute accuracy for training use.
+```bash
+cd tools/train_ball_detector
+pip install ultralytics coremltools
+python train.py --data golf_ball.yaml --epochs 100 --device 0
+python export_coreml.py --model runs/golf_ball/train/weights/best.pt
+```
 
-**Do NOT use:** AI frame interpolation (RIFE/FILM) for measurement — no new temporal information. LiDAR for direct tracking — 60fps/256×192 insufficient.
+### PiTrac 可行性
 
-## Critical: Frame Timing
+```bash
+python projects/PiTracIPhoneFeasibilityStudy/tools/build_gap_report.py
+```
 
-**iPhone 240fps is NOT guaranteed.** Reports show iPhone 14 Pro delivers 162-200fps actual when set to 240fps. Speed calculations MUST use actual frame timestamps from `CMSampleBuffer.presentationTimeStamp`, never assume consistent 1/240s intervals.
+## 架构要点
 
-## Known Hard Problems
+### GolfAnalysisKit（共享核心算法）
 
-1. Motion blur at 100+ mph makes club head detection unreliable at impact
-2. Club head is small, fast, and often low-contrast against background
-3. Occlusion when club passes behind golfer's body
-4. Perspective distortion from front-on camera angle
-5. Thermal throttling during sustained 240fps capture
-6. Outdoor wind noise interfering with audio swing detection
+两个 App 的算法核心，模块划分：
+- **Detection**：BallDetector 协议 + FrameDifferenceBallDetector + FusedBallDetector
+- **Tracking**：KalmanFilter2D/6D + OpticalFlowTracker + BallTrackingPipeline
+- **SpeedCalc**：SpeedCalculator + BallSpeedCalculator + SwingPlaneCorrector + MotionBlurAnalyser
+- **Trajectory**：LaunchConditionEstimator + EnvironmentModel + TrajectoryPhysicsModel（RK4 积分 + 空气阻力 + Magnus 效应）+ BezierTrajectoryModel + TrajectoryPredictor
+- **Session**：SwingSession + SwingSessionStore（JSONL 持久化）+ PersonalStatsCalculator + InsightEngine
+- **Analysis**：LagAnalyser + BodyPoseFrame
 
-## Version Control & Git Workflow
+### 数据平台核心链路
 
-### Commit & Push Policy
-- **Always commit and push to GitHub** after: research completion, major document updates, or feature updates — keep the remote repo in sync at all times
-- Commit messages should be descriptive and reference the version number where applicable
+`采集会话 → 样本注册(SHA-256去重) → 会话隔离切分 → 清单导出 → 质量校验`
 
-### Versioning — V0.00.00 Bump Workflow
-The project uses a three-tier semantic version format: **V`MAJOR`.`MINOR`.`PATCH`**
+- 注册表：`datasets/registry/{sessions,samples,duplicates}.jsonl`
+- 契约 schema：`contracts/{session_record,sample_record,dataset_manifest}.schema.json`
+- 消费者清单：`exports/consumers/{human_club_analysis_app,golf_ball_detection_app,pitrac_feasibility_study}.json`
+- 工具库核心：`tools/lib/registry.py`
 
-| Bump | Format | When | Approval Required? |
-|---|---|---|---|
-| Patch | `0.00.XX` | Minor code changes, bug fixes, small tweaks | No — apply freely |
-| Minor | `0.XX.00` | Larger feature updates, significant refactors, new capabilities | **Yes — requires user approval before bumping** |
-| Major | `X.00.00` | Significant large builds, major milestones, breaking changes | **Yes — requires user approval before bumping** |
+（以上路径均相对于 `projects/DatasetCollectionPlatform/`）
 
-- Current version: **V0.02.10**
-- Version is tracked in the project and updated with each relevant commit
-- Patch resets to 00 on minor bump; patch and minor reset to 00 on major bump
-- When in doubt about bump level, ask before committing
+### iOS 采集端 (AppleOSDatasetCollectorApp)
 
-## Build & Run
+SwiftUI 架构，240fps@1080p 高速录制 + 12 种 Vision 回放分析模型。
 
-*Not yet applicable — no Xcode project created yet. See TASKS.md for development plan.*
+- Core 层：`DatasetCollectorApp/Sources/Core/` — 模型、JSONL 持久化、相机、验证、服务
+- Features：`Sources/Features/{Collector,Recording,DataBrowser}/`
+- 回放分析使用自定义 AVPlayerLayer（非 SwiftUI VideoPlayer），骨架叠加需 `.up` 方向 + letterbox 坐标映射
+- 清晰度验证用像素级 Laplacian 方差（非 CIConvolution3X3）
+
+### 两个消费端 App
+
+- 通过 DatasetBridge 集成：`Sources/Integrations/DatasetBridge/` 读取 consumer manifest
+- 环境变量覆盖：`HUMAN_CLUB_MANIFEST_PATH` / `GOLF_BALL_MANIFEST_PATH` / `DATASET_MANIFEST_PATH`
+- GolfBallDetectionApp 额外包含 `YOLOBallDetector`（CoreML 推理）和轨迹可视化（TrajectoryOverlayView + FlightDataPanel + VideoReplayView）
+- HumanClubAnalysisApp 包含 LiDAR 校准、音频击球检测、挥杆状态机、光流追踪
+
+### iOS App 源码布局约定
+
+三个 iOS 工程统一采用：
+```
+Sources/
+  App/          — @main 入口
+  Core/         — 模型、服务、相机、持久化
+  Features/     — 按功能域拆分的 View + ViewModel
+  Integrations/ — 外部数据桥接（DatasetBridge）
+Resources/      — 资源文件
+Tests/Unit/     — 单元测试
+```
+
+## 质量关口
+
+以下必须全部通过才算数据闭环完成：
+1. `validate_registry.py --strict` 无 schema 错误
+2. 两个域都有 `exports/splits/<domain>.json`
+3. 三个消费者清单已生成
+4. `validate_apple_project.py` 通过
+5. `simulate_ios_workflow.py` 模拟报告通过
+
+## 工作规范
+
+- 文档统一中文
+- 提交信息使用前缀：`feat:` `fix:` `refactor:` `docs:` `test:` `chore:`，说明"改了什么 + 为什么改"
+- 先做最小可验证实现，跑回归并记录结果，再扩展
+- 任何"可能影响精度"的改动都要附验证记录
+- 对阈值、滤波参数等关键常量给出来源说明
+- 长任务维护根目录 `上下文压缩入口.md` 确保新会话可快速接续
+- 研究文档集中在 `文档/研究/`，项目总览在 `文档/总览/`

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://golf-swing-speed-app.local/contracts/sample-record.schema.json",
+  "title": "Sample Record",
+  "type": "object",
+  "required": [
+    "sampleId",
+    "domain",
+    "sha256",
+    "hashAlgorithm",
+    "assetPath",
+    "fileSize",
+    "sessionId",
+    "collector",
+    "device",
+    "deviceProfile",
+    "capturedAt",
+    "sourcePath",
+    "status"
+  ],
+  "properties": {
+    "sampleId": { "type": "string" },
+    "domain": { "type": "string", "enum": ["human_club", "golf_ball_detection"] },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "hashAlgorithm": { "type": "string", "enum": ["sha256"] },
+    "assetPath": { "type": "string" },
+    "annotationPath": { "type": ["string", "null"] },
+    "fileSize": { "type": "integer", "minimum": 0 },
+    "sessionId": { "type": "string" },
+    "collector": { "type": "string" },
+    "device": { "type": "string" },
+    "deviceProfile": { "type": "string" },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "sourcePath": { "type": "string" },
+    "shotId": { "type": ["string", "null"] },
+    "takeIndex": { "type": "integer", "minimum": 1 },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "fps": { "type": "integer", "minimum": 1 },
+        "resolution": { "type": "string" },
+        "clubType": { "type": "string" },
+        "handedness": { "type": "string", "enum": ["left", "right", "unknown"] },
+        "swingIntensity": { "type": "string", "enum": ["warmup", "normal", "max", "unknown"] },
+        "surface": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "status": { "type": "string", "enum": ["active", "archived"] }
+  },
+  "additionalProperties": false
+}

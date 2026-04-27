@@ -1,0 +1,11 @@
+# 高尔夫球检测数据集配置
+# 使用前需要准备好 YOLO 格式的标注数据
+
+path: ../../datasets/golf_ball  # 数据集根目录（相对于此文件）
+train: train/images
+val: val/images
+test: test/images
+
+nc: 1  # 类别数
+names:
+  0: golf_ball

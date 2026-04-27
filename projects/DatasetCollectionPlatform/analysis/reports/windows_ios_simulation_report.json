@@ -1,0 +1,32 @@
+{
+  "sessionId": "sess_40b3dbe6a828",
+  "simulatedAtUtc": "2026-04-23T23:28:56.211930+00:00",
+  "humanSamples": 1,
+  "ballSamples": 1,
+  "duplicateEvents": 1,
+  "validationErrors": 0,
+  "manifestUniqueSamples": 2,
+  "appleProjectValidation": {
+    "projectFile": "/private/var/folders/zc/4clz9z2d6z5266tg9qk4vc7m0000gn/T/ios-workflow-sim-5khf34ia/DatasetCollectionPlatform/AppleOSDatasetCollectorApp/project.yml",
+    "ok": true,
+    "errors": [],
+    "warnings": [],
+    "targets": {
+      "DatasetCollectorApp": true,
+      "DatasetCollectorAppTests": true
+    },
+    "counts": {
+      "swiftSources": 16,
+      "swiftTests": 1
+    },
+    "deploymentTargetiOS": "17.0"
+  },
+  "steps": {
+    "validate_apple_project": "ok",
+    "start_session": "ok",
+    "register_samples": "ok",
+    "split_dataset": "ok",
+    "generate_manifest": "ok",
+    "validate_registry": "ok"
+  }
+}

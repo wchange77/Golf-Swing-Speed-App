@@ -1,0 +1,58 @@
+name: GolfSwingSpeedApp
+options:
+  bundleIdPrefix: com.simonyorke
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.4"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1"
+    INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+    INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+
+packages:
+  GolfAnalysisKit:
+    path: ../../packages/GolfAnalysisKit
+
+targets:
+  GolfSwingSpeedApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: GolfSwingSpeedApp/Sources
+      - path: GolfSwingSpeedApp/Resources
+    dependencies:
+      - package: GolfAnalysisKit
+    info:
+      path: GolfSwingSpeedApp/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSCameraUsageDescription: "Golf Swing Speed App needs camera access to record your golf swing at 240fps for speed measurement."
+        NSMicrophoneUsageDescription: "Golf Swing Speed App uses the microphone to detect swing sounds and automatically trigger recording."
+        NSWorldSensingUsageDescription: "Golf Swing Speed App uses LiDAR to calibrate real-world distances for accurate speed measurement."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.simonyorke.GolfSwingSpeedApp
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    entitlements:
+      path: GolfSwingSpeedApp/GolfSwingSpeedApp.entitlements
+
+  GolfSwingSpeedAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: GolfSwingSpeedApp/Tests/Unit
+    dependencies:
+      - target: GolfSwingSpeedApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.simonyorke.GolfSwingSpeedAppTests
+        GENERATE_INFOPLIST_FILE: "YES"

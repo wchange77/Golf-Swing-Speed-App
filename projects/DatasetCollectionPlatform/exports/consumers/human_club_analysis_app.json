@@ -1,0 +1,33 @@
+{
+  "version": "1.2",
+  "generatedAt": "2026-04-20T06:56:54.709124+00:00",
+  "consumer": "human_club_analysis_app",
+  "domains": [
+    "human_club"
+  ],
+  "registry": {
+    "samplesFile": "datasets/registry/samples.jsonl",
+    "duplicatesFile": "datasets/registry/duplicates.jsonl",
+    "sessionsFile": "datasets/registry/sessions.jsonl",
+    "uniqueSamples": 0,
+    "duplicateSamples": 0,
+    "sessions": 0,
+    "lastSessionAt": null,
+    "lastSampleAt": null
+  },
+  "datasets": [
+    {
+      "key": "human_club",
+      "path": "datasets/processed/human_club",
+      "samples": 0,
+      "format": "coco",
+      "duplicateFiltered": 0,
+      "splitFile": "exports/splits/human_club.json",
+      "split": {
+        "train": 0,
+        "val": 0,
+        "test": 0
+      }
+    }
+  ]
+}
