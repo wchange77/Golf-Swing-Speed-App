@@ -30,7 +30,7 @@ targets:
         NSPhotoLibraryUsageDescription: "Dataset Collector needs access to photo library for dataset export/import."
         NSPhotoLibraryAddUsageDescription: "Dataset Collector needs permission to export captured dataset files."
         NSCameraUsageDescription: "Dataset Collector needs camera access to capture dataset samples."
-        NSMicrophoneUsageDescription: "Dataset Collector may use microphone for audio-triggered recording."
+        NSMicrophoneUsageDescription: "同步录制挥杆音频用于 Impact 检测。"
         NSLocationWhenInUseUsageDescription: "Dataset Collector records GPS coordinates for each collection session."
     settings:
       base:

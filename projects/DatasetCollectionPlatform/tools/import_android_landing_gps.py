@@ -63,22 +63,33 @@ def measurements_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(landing, dict):
         return []
 
-    return [{
+    reference = {
         "source": "android_landing_point",
         "device": record.get("device"),
         "capturedAt": record.get("capturedAt"),
         "clubSpeedMph": None,
         "ballSpeedMph": None,
-        "carryDistanceMeters": None,
-        "totalDistanceMeters": None,
+        "carryDistanceMeters": record.get("carryDistanceMeters"),
+        "totalDistanceMeters": record.get("carryDistanceMeters"),
         "launchAngleDegrees": None,
         "spinRateRpm": None,
         "landingLocation": landing,
-        "notes": "android landing gps import",
-    }]
+        "notes": record.get("userNotes") or "android landing gps import",
+    }
+    return [reference]
 
 
-def import_landing_points(android_jsonl: Path) -> dict[str, int]:
+def _take_index(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        take = int(value)
+        return take if take > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def import_landing_points(android_jsonl: Path, *, strict: bool = False) -> dict[str, int]:
     ensure_registry_files()
     sessions = read_jsonl(SESSIONS_FILE)
     samples = read_jsonl(SAMPLES_FILE)
@@ -91,9 +102,13 @@ def import_landing_points(android_jsonl: Path) -> dict[str, int]:
         "updatedSamples": 0,
         "skippedRows": 0,
         "ambiguousRows": 0,
+        "takeIndexMatches": 0,
+        "sessionFallbackMatches": 0,
     }
 
-    measurements_by_session: dict[str, list[dict[str, Any]]] = {}
+    session_bucket: dict[str, list[dict[str, Any]]] = {}
+    take_bucket: dict[tuple[str, int], list[dict[str, Any]]] = {}
+
     for row in landing_rows:
         session_name = str(row.get("sessionName", "")).strip()
         if not session_name:
@@ -110,37 +125,59 @@ def import_landing_points(android_jsonl: Path) -> dict[str, int]:
         if not measurements:
             stats["skippedRows"] += 1
             continue
-        measurements_by_session.setdefault(session_id, []).extend(measurements)
+        take = _take_index(row.get("takeIndex"))
+        if take is not None:
+            take_bucket.setdefault((session_id, take), []).extend(measurements)
+        else:
+            session_bucket.setdefault(session_id, []).extend(measurements)
         stats["matchedRows"] += 1
 
-    if not measurements_by_session:
+    if not session_bucket and not take_bucket:
         return stats
 
     updated: list[dict[str, Any]] = []
     for sample in samples:
-        session_measurements = measurements_by_session.get(sample.get("sessionId", ""))
-        if session_measurements:
+        session_id = sample.get("sessionId", "")
+        additions: list[dict[str, Any]] = []
+
+        sample_take = _take_index(sample.get("takeIndex"))
+        if sample_take is not None:
+            take_additions = take_bucket.get((session_id, sample_take))
+            if take_additions:
+                additions.extend(take_additions)
+                stats["takeIndexMatches"] += 1
+
+        session_additions = session_bucket.get(session_id)
+        if session_additions:
+            additions.extend(session_additions)
+            stats["sessionFallbackMatches"] += 1
+
+        if additions:
             metadata = dict(sample.get("metadata") or {})
             existing = metadata.get("referenceMeasurements")
             if not isinstance(existing, list):
                 existing = []
-            metadata["referenceMeasurements"] = existing + session_measurements
+            metadata["referenceMeasurements"] = existing + additions
             sample = dict(sample)
             sample["metadata"] = metadata
             validate_with_schema(sample, SAMPLE_SCHEMA_FILE)
             stats["updatedSamples"] += 1
         updated.append(sample)
 
+    if strict and stats["updatedSamples"] == 0:
+        raise SystemExit("strict 模式：没有任何样本被更新，检查 sessionName 或 takeIndex 是否匹配")
+
     write_jsonl(SAMPLES_FILE, updated)
     return stats
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="导入 Android 落球点 GPS JSONL 到样本参考测量")
+    parser = argparse.ArgumentParser(description="导入 Android 落球点 GPS JSONL 到样本参考测量（支持 takeIndex 精确匹配）")
     parser.add_argument("--android-jsonl", required=True, help="AndroidLandingGpsCollector 导出的 landing_points.jsonl")
+    parser.add_argument("--strict", action="store_true", help="至少匹配到一个样本才算成功")
     args = parser.parse_args()
 
-    stats = import_landing_points(Path(args.android_jsonl).resolve())
+    stats = import_landing_points(Path(args.android_jsonl).resolve(), strict=args.strict)
     print(json.dumps(stats, ensure_ascii=False))
 
 

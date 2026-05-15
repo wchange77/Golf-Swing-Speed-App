@@ -5,8 +5,11 @@ import Foundation
 final class DatasetLocationManager: NSObject, ObservableObject {
     @Published private(set) var latestLocation: CollectorLocation?
     @Published private(set) var statusText: String = "定位未启动"
+    @Published private(set) var isFetching: Bool = false
 
     private let manager = CLLocationManager()
+    private var timeoutTask: Task<Void, Never>?
+    private let timeoutSeconds: TimeInterval = 8.0
 
     override init() {
         super.init()
@@ -23,15 +26,50 @@ final class DatasetLocationManager: NSObject, ObservableObject {
         case .authorizedWhenInUse, .authorizedAlways:
             requestLocation()
         case .denied, .restricted:
-            statusText = "定位权限未开启"
+            statusText = "定位权限未开启（可跳过，会话将不记录 GPS）"
         @unknown default:
             statusText = "定位状态未知"
         }
     }
 
     func requestLocation() {
-        manager.requestLocation()
-        statusText = "正在获取定位"
+        guard manager.authorizationStatus == .authorizedWhenInUse
+                || manager.authorizationStatus == .authorizedAlways else {
+            statusText = "无定位权限，跳过 GPS"
+            return
+        }
+        cancelTimeout()
+        isFetching = true
+        statusText = "正在获取 GPS…（最多 \(Int(timeoutSeconds)) 秒）"
+        manager.startUpdatingLocation()
+        timeoutTask = Task { [timeoutSeconds] in
+            try? await Task.sleep(for: .seconds(timeoutSeconds))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self.handleTimeout() }
+        }
+    }
+
+    func cancel() {
+        cancelTimeout()
+        manager.stopUpdatingLocation()
+        isFetching = false
+        if latestLocation == nil {
+            statusText = "已跳过 GPS（会话不记录位置）"
+        }
+    }
+
+    private func handleTimeout() {
+        manager.stopUpdatingLocation()
+        timeoutTask = nil
+        isFetching = false
+        if latestLocation == nil {
+            statusText = "GPS 超时，可继续创建会话（会话不记录位置）"
+        }
+    }
+
+    private func cancelTimeout() {
+        timeoutTask?.cancel()
+        timeoutTask = nil
     }
 
     private func update(with location: CLLocation) {
@@ -45,6 +83,11 @@ final class DatasetLocationManager: NSObject, ObservableObject {
             source: "ios_core_location"
         )
         statusText = String(format: "已定位：%.1f 米精度", max(location.horizontalAccuracy, 0))
+        if location.horizontalAccuracy <= 30 {
+            cancelTimeout()
+            manager.stopUpdatingLocation()
+            isFetching = false
+        }
     }
 }
 
@@ -64,7 +107,10 @@ extension DatasetLocationManager: CLLocationManagerDelegate {
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         Task { @MainActor in
-            statusText = "定位失败：\(error.localizedDescription)"
+            cancelTimeout()
+            self.manager.stopUpdatingLocation()
+            isFetching = false
+            statusText = "定位失败：\(error.localizedDescription)（可继续创建会话）"
         }
     }
 }

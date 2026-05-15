@@ -1,6 +1,6 @@
 {
   "version": "1.2",
-  "generatedAt": "2026-04-20T06:56:54.710125+00:00",
+  "generatedAt": "2026-05-09T09:59:14.083694+00:00",
   "consumer": "pitrac_feasibility_study",
   "domains": [
     "human_club",
@@ -28,7 +28,9 @@
         "train": 0,
         "val": 0,
         "test": 0
-      }
+      },
+      "annotationCoverage": 0.0,
+      "labeledSamples": 0
     },
     {
       "key": "golf_ball_detection",
@@ -41,7 +43,9 @@
         "train": 0,
         "val": 0,
         "test": 0
-      }
+      },
+      "annotationCoverage": 0.0,
+      "labeledSamples": 0
     }
   ]
 }

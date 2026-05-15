@@ -15,6 +15,7 @@ final class DatasetCollectorViewModel: ObservableObject {
     @Published var lighting: String = "indoor_led"
     @Published var tripod: Bool = true
     @Published var distanceMeters: Double = 4.0
+    @Published var targetDomains: Set<DatasetDomain> = [.humanClub, .golfBallDetection]
 
     @Published private(set) var activeSession: CollectorSessionRecord?
     @Published private(set) var statsSummary: String = "会话 0 / 样本 0 / 重复 0"
@@ -41,6 +42,7 @@ final class DatasetCollectorViewModel: ObservableObject {
         if distanceMeters < 3.0 || distanceMeters > 5.0 { return "相机距离需在 3-5 米" }
         if fps < 120 { return "帧率需至少 120fps，推荐 240fps" }
         if resolution.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "分辨率不能为空" }
+        if targetDomains.isEmpty { return "至少选择一个目标域" }
         return "OK"
     }
 
@@ -71,7 +73,7 @@ final class DatasetCollectorViewModel: ObservableObject {
                 tripod: tripod,
                 distanceMeters: distanceMeters,
                 location: location,
-                targetDomains: [.humanClub, .golfBallDetection]
+                targetDomains: Array(targetDomains).sorted { $0.rawValue < $1.rawValue }
             )
             let session = try service.createSession(request)
             activeSession = session

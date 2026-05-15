@@ -16,6 +16,7 @@ REGISTRY_DIR = ROOT / "datasets" / "registry"
 SAMPLES_FILE = REGISTRY_DIR / "samples.jsonl"
 DUPLICATES_FILE = REGISTRY_DIR / "duplicates.jsonl"
 SESSIONS_FILE = REGISTRY_DIR / "sessions.jsonl"
+ANNOTATIONS_FILE = REGISTRY_DIR / "annotations.jsonl"
 CONTRACTS_DIR = ROOT / "contracts"
 SAMPLE_SCHEMA_FILE = CONTRACTS_DIR / "sample_record.schema.json"
 SESSION_SCHEMA_FILE = CONTRACTS_DIR / "session_record.schema.json"
@@ -26,7 +27,7 @@ ALLOWED_DOMAINS = {"human_club", "golf_ball_detection"}
 
 def ensure_registry_files() -> None:
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    for p in (SAMPLES_FILE, DUPLICATES_FILE, SESSIONS_FILE):
+    for p in (SAMPLES_FILE, DUPLICATES_FILE, SESSIONS_FILE, ANNOTATIONS_FILE):
         if not p.exists():
             p.touch()
 
@@ -215,3 +216,86 @@ def register_one_sample(
     validate_with_schema(record, SAMPLE_SCHEMA_FILE)
     append_jsonl(SAMPLES_FILE, record)
     return sample_id
+
+
+ANNOTATION_KINDS = ("yolo_bbox", "coco_keypoints", "frame_index")
+
+
+def list_samples(
+    domain: str | None = None,
+    *,
+    status: str | None = "active",
+    session_id: str | None = None,
+) -> list[dict[str, Any]]:
+    ensure_registry_files()
+    rows = read_jsonl(SAMPLES_FILE)
+    if domain is not None:
+        rows = [r for r in rows if r.get("domain") == domain]
+    if status is not None:
+        rows = [r for r in rows if r.get("status") == status]
+    if session_id is not None:
+        rows = [r for r in rows if r.get("sessionId") == session_id]
+    return rows
+
+
+def annotation_dir_for(sample_id: str, kind: str) -> Path:
+    if kind not in ANNOTATION_KINDS:
+        raise ValueError(f"annotation kind must be one of {ANNOTATION_KINDS}")
+    return ROOT / "datasets" / "annotations" / kind / sample_id
+
+
+def annotation_path_for(sample_id: str, kind: str, *, filename: str | None = None) -> Path:
+    base = annotation_dir_for(sample_id, kind)
+    return base / filename if filename else base
+
+
+def upsert_annotation_record(record: dict[str, Any]) -> None:
+    ensure_registry_files()
+    required = {"sampleId", "sha256", "domain", "kind", "framesTotal", "framesLabeled", "updatedAt"}
+    missing = required - record.keys()
+    if missing:
+        raise ValueError(f"annotation record missing fields: {sorted(missing)}")
+    if record["kind"] not in ANNOTATION_KINDS:
+        raise ValueError(f"annotation kind must be one of {ANNOTATION_KINDS}")
+
+    rows = read_jsonl(ANNOTATIONS_FILE)
+    key = (record["sampleId"], record["kind"])
+    replaced = False
+    for idx, row in enumerate(rows):
+        if (row.get("sampleId"), row.get("kind")) == key:
+            rows[idx] = record
+            replaced = True
+            break
+    if not replaced:
+        rows.append(record)
+
+    tmp = ANNOTATIONS_FILE.with_suffix(ANNOTATIONS_FILE.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    tmp.replace(ANNOTATIONS_FILE)
+
+
+def read_annotation_records(
+    *, sample_id: str | None = None, domain: str | None = None, kind: str | None = None
+) -> list[dict[str, Any]]:
+    ensure_registry_files()
+    rows = read_jsonl(ANNOTATIONS_FILE)
+    if sample_id is not None:
+        rows = [r for r in rows if r.get("sampleId") == sample_id]
+    if domain is not None:
+        rows = [r for r in rows if r.get("domain") == domain]
+    if kind is not None:
+        rows = [r for r in rows if r.get("kind") == kind]
+    return rows
+
+
+def annotation_coverage(sample_id: str) -> float:
+    records = read_annotation_records(sample_id=sample_id)
+    if not records:
+        return 0.0
+    total = max((r.get("framesTotal") or 0) for r in records)
+    labeled = max((r.get("framesLabeled") or 0) for r in records)
+    if total <= 0:
+        return 0.0
+    return min(labeled / total, 1.0)

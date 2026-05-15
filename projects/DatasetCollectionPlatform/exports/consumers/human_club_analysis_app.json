@@ -1,6 +1,6 @@
 {
   "version": "1.2",
-  "generatedAt": "2026-04-20T06:56:54.709124+00:00",
+  "generatedAt": "2026-05-09T09:59:14.083062+00:00",
   "consumer": "human_club_analysis_app",
   "domains": [
     "human_club"
@@ -27,7 +27,9 @@
         "train": 0,
         "val": 0,
         "test": 0
-      }
+      },
+      "annotationCoverage": 0.0,
+      "labeledSamples": 0
     }
   ]
 }

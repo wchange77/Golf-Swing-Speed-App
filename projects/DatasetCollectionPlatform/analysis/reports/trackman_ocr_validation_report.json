@@ -1,0 +1,39 @@
+{
+  "generatedAt": "2026-05-12T01:32:28.534655Z",
+  "sourceOutputDir": "/private/tmp/trackman_alignment_ocr_rapid",
+  "ocrEngine": "rapidocr",
+  "summary": {
+    "inputPhotos": 216,
+    "ocrFiles": 216,
+    "ocrStatusOk": 216,
+    "matchedShots": 211,
+    "unmatchedShots": 18,
+    "unmatchedPhotos": 5,
+    "averageTimeDeltaSeconds": 5.636161,
+    "maxTimeDeltaSeconds": 28.75
+  },
+  "engineCounts": {
+    "rapidocr_onnxruntime": 216
+  },
+  "statusCounts": {
+    "ok": 216
+  },
+  "lineCount": {
+    "min": 28,
+    "max": 138,
+    "avg": 114.963
+  },
+  "textHits": {
+    "TRACKMAN": 92,
+    "CLUB SPEED": 55,
+    "LAUNCHANGLE": 95,
+    "CARRY": 166,
+    "CURVE": 121,
+    "数据": 215,
+    "击球列表": 166,
+    "分享": 200,
+    "全屏": 86,
+    "设定": 208
+  },
+  "conclusion": "RapidOCR is the best currently verified engine for this TrackMan batch."
+}

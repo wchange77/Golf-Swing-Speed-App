@@ -265,6 +265,57 @@ python tools/import_android_landing_gps.py --android-jsonl /path/to/landing_poin
 
 导入后会按 `sessionName` 找到对应会话，并把落点 GPS 追加到该会话样本的 `metadata.referenceMeasurements`。若同名会话不唯一，导入工具会跳过，避免把参考数据写错样本。
 
+### 路径 D：抽帧 + 半自动标注 + 训练集导出
+
+适用于已注册 `.mov` 视频需要产出 YOLO / COCO 训练数据。
+
+```bash
+# 1. 抽帧（按 impact 窗口密集抽，其他稀疏抽）
+python tools/extract_frames.py --domain golf_ball_detection --mode impact_window --fps 10
+python tools/extract_frames.py --domain human_club --mode impact_window --fps 8
+
+# 2. 预标注
+python tools/prelabel_yolo.py --source vision                         # 占位（居中 6% 方块）
+python tools/prelabel_yolo.py --source ultralytics --weights best.pt  # 用真实权重推理
+python tools/prelabel_pose.py
+
+# 3. 导出 Label Studio 任务 + 配置
+python tools/export_to_labelstudio.py --domain golf_ball_detection
+python tools/export_to_labelstudio.py --domain human_club
+
+# 4. 在 Label Studio 里校正，然后导出 annotations JSON，回写
+python tools/import_from_labelstudio.py --input ls_ball_export.json --domain golf_ball_detection
+python tools/import_from_labelstudio.py --input ls_pose_export.json --domain human_club
+
+# 5. 按 split 导出训练数据集
+python tools/split_dataset.py --domain golf_ball_detection --strategy session
+python tools/export_yolo_dataset.py --write-yaml ../../../tools/train_ball_detector/golf_ball.yaml
+python tools/export_coco_keypoints.py
+```
+
+抽帧写 `datasets/registry/frames_index.jsonl`，预标注写 `prelabels_manifest.jsonl`，校正结果 upsert 到 `annotations.jsonl`。`generate_manifest.py` 汇总每个域的 `annotationCoverage`（平均）与 `labeledSamples`。
+
+### 路径 E：TrackMan 照片按时间对齐导入
+
+适用于 `DatasetCollectorExport/trackman.zip` 这类只包含 TrackMan 照片的导出包。
+
+```bash
+python tools/import_trackman_export.py \
+  --export-dir DatasetCollectorExport \
+  --output-dir exports/trackman_alignment \
+  --photo-timezone-offset-hours 8 \
+  --threshold-seconds 30
+```
+
+默认行为：
+- 以照片 EXIF / 文件名时间为准，按 `UTC+8` 解释
+- 与 `samples.jsonl` 里的 `capturedAt` 做时间对齐
+- 自动匹配阈值默认 30 秒
+- 每个击球生成一个集合目录，照片、OCR 结果和样本引用一起保存
+- 漏拍或多拍会写入 `exports/trackman_alignment/review/review.json`
+
+OCR 依赖 `pytesseract` 和本机 `tesseract` 二进制；如果本机未安装，脚本仍会完成对齐，只是 OCR 状态会标记为 `unavailable`。
+
 ---
 
 ## 数据契约（Schema）
@@ -309,9 +360,17 @@ python tools/import_android_landing_gps.py --android-jsonl /path/to/landing_poin
 | `validate_registry.py` | Schema 校验注册表 |
 | `dataset_stats.py` | 数据集统计概览（按域/球杆/惯用手/强度/场地分布） |
 | `import_ios_export.py` | 导入 iOS 采集端导出数据 |
+| `import_trackman_export.py` | 导入 TrackMan 照片并按时间对齐到样本集合 |
 | `import_android_landing_gps.py` | 导入 Android 落球点 GPS 到样本参考测量 |
 | `validate_apple_project.py` | 校验 iOS 工程结构 |
 | `simulate_ios_workflow.py` | 模拟端到端集成测试 |
+| `extract_frames.py` | 从注册视频抽帧（uniform / impact_window） |
+| `prelabel_yolo.py` | YOLO bbox 预标注（vision 占位 / ultralytics 推理） |
+| `prelabel_pose.py` | COCO Keypoints 17 点占位预标注 |
+| `export_to_labelstudio.py` | 导出 Label Studio 任务清单 + XML 模板 |
+| `import_from_labelstudio.py` | 回写 Label Studio 校正结果到 annotations |
+| `export_yolo_dataset.py` | 按 split 导出 YOLO 训练集 + 更新 golf_ball.yaml |
+| `export_coco_keypoints.py` | 按 split 导出 COCO Keypoints 训练集 |
 
 核心库：`tools/lib/registry.py` — 包含 `register_one_sample()`、SHA-256 计算、JSONL 读写、Schema 校验等所有共享逻辑。
 

@@ -1,13 +1,13 @@
 {
-  "sessionId": "sess_260008ee27e2",
-  "simulatedAtUtc": "2026-04-24T09:24:46.706921+00:00",
+  "sessionId": "sess_8cd4daf742b9",
+  "simulatedAtUtc": "2026-05-09T10:35:55.482805+00:00",
   "humanSamples": 1,
   "ballSamples": 1,
   "duplicateEvents": 1,
   "validationErrors": 0,
   "manifestUniqueSamples": 2,
   "appleProjectValidation": {
-    "projectFile": "/private/var/folders/zc/4clz9z2d6z5266tg9qk4vc7m0000gn/T/ios-workflow-sim-bmmf_fmp/DatasetCollectionPlatform/AppleOSDatasetCollectorApp/project.yml",
+    "projectFile": "/private/var/folders/zc/4clz9z2d6z5266tg9qk4vc7m0000gn/T/ios-workflow-sim-lm4l3ru8/DatasetCollectionPlatform/AppleOSDatasetCollectorApp/project.yml",
     "ok": true,
     "errors": [],
     "warnings": [],
@@ -16,7 +16,7 @@
       "DatasetCollectorAppTests": true
     },
     "counts": {
-      "swiftSources": 16,
+      "swiftSources": 17,
       "swiftTests": 2
     },
     "deploymentTargetiOS": "17.0"

@@ -161,6 +161,8 @@ final class DatasetCollectorService {
         depthSamples: [DepthSample],
         lidarCalibration: LiDARCalibrationData?,
         calibration: CollectorCalibrationSnapshot? = nil,
+        intrinsics: CameraIntrinsicsSample? = nil,
+        audioStats: RecordingAudioStats? = nil,
         hasLiDAR: Bool = false,
         referenceMeasurements: [CollectorReferenceMeasurement] = []
     ) throws -> [CollectorSampleRecord] {
@@ -177,6 +179,7 @@ final class DatasetCollectorService {
             cameraAngleDegrees: cameraAngleDegrees,
             lidarCalibration: lidarCalibration,
             calibration: calibration,
+            intrinsics: intrinsics,
             hasLiDAR: hasLiDAR
         )
 
@@ -254,6 +257,8 @@ final class DatasetCollectorService {
                 depthSamples: depthSamples,
                 lidarCalibration: lidarCalibration,
                 calibration: calibrationSnapshot,
+                intrinsics: intrinsics,
+                audioStats: audioStats,
                 hasLiDAR: hasLiDAR
             )
             let metadata = buildMetadata(
@@ -446,6 +451,8 @@ final class DatasetCollectorService {
         depthSamples: [DepthSample],
         lidarCalibration: LiDARCalibrationData?,
         calibration: CollectorCalibrationSnapshot,
+        intrinsics: CameraIntrinsicsSample?,
+        audioStats: RecordingAudioStats?,
         hasLiDAR: Bool
     ) throws -> CollectorSidecarPaths {
         let generatedAt = DatasetCollectorDateFormatter.nowISO8601()
@@ -467,7 +474,7 @@ final class DatasetCollectorService {
             metrics: metrics
         )
         let camera = CollectorCameraSidecar(
-            version: "1.0",
+            version: "1.1",
             generatedAt: generatedAt,
             device: session.device,
             deviceProfile: session.deviceProfile,
@@ -478,7 +485,8 @@ final class DatasetCollectorService {
             captureOrientation: metrics.orientation,
             hasLiDAR: hasLiDAR,
             calibration: calibration,
-            lidarCalibration: lidarCalibration
+            lidarCalibration: lidarCalibration,
+            intrinsics: intrinsics
         )
         let labelCandidates = makeLabelCandidateSidecar(
             generatedAt: generatedAt,
@@ -491,11 +499,32 @@ final class DatasetCollectorService {
         let cameraURL = try writeSidecar(camera, assetURL: assetURL, suffix: "camera.json")
         let labelURL = try writeSidecar(labelCandidates, assetURL: assetURL, suffix: "label_candidates.json")
 
+        var audioRelativePath: String?
+        if let audioStats {
+            let audio = CollectorAudioSidecar(
+                version: "1.0",
+                generatedAt: generatedAt,
+                sampleRate: audioStats.sampleRate,
+                channelCount: audioStats.channelCount,
+                durationSeconds: audioStats.durationSeconds,
+                peakAmplitude: audioStats.peakAmplitude,
+                rmsDbfs: audioStats.rmsDbfs,
+                silenceRatio: audioStats.silenceRatio,
+                impactBandPeakHz: audioStats.impactBandPeakHz,
+                impactBandEnergyRatio: audioStats.impactBandEnergyRatio,
+                frameCount: audioStats.frameCount,
+                notes: "采集端实时累加的音频统计；2–5kHz 为预设击球频段，供消费端 SwingAudioDetector 离线对齐。"
+            )
+            let audioURL = try writeSidecar(audio, assetURL: assetURL, suffix: "audio.json")
+            audioRelativePath = store.relativeExportPath(for: audioURL)
+        }
+
         return CollectorSidecarPaths(
             timeline: store.relativeExportPath(for: timelineURL),
             quality: store.relativeExportPath(for: qualityURL),
             camera: store.relativeExportPath(for: cameraURL),
-            labelCandidates: store.relativeExportPath(for: labelURL)
+            labelCandidates: store.relativeExportPath(for: labelURL),
+            audio: audioRelativePath
         )
     }
 
@@ -609,10 +638,62 @@ final class DatasetCollectorService {
         cameraAngleDegrees: Double,
         lidarCalibration: LiDARCalibrationData?,
         calibration: CollectorCalibrationSnapshot?,
+        intrinsics: CameraIntrinsicsSample?,
         hasLiDAR: Bool
     ) -> CollectorCalibrationSnapshot {
         if let calibration {
+            if calibration.intrinsics == nil, let intrinsics {
+                return CollectorCalibrationSnapshot(
+                    status: calibration.status,
+                    method: calibration.method,
+                    source: calibration.source,
+                    distanceMeters: calibration.distanceMeters,
+                    cameraHeightMeters: calibration.cameraHeightMeters,
+                    cameraAngleDegrees: calibration.cameraAngleDegrees,
+                    pixelsPerMetre: calibration.pixelsPerMetre,
+                    groundPlaneY: calibration.groundPlaneY,
+                    clubLengthMeters: calibration.clubLengthMeters,
+                    lieAngleDegrees: calibration.lieAngleDegrees,
+                    armLengthMeters: calibration.armLengthMeters,
+                    swingPlaneNormalX: calibration.swingPlaneNormalX,
+                    swingPlaneNormalY: calibration.swingPlaneNormalY,
+                    swingPlaneNormalZ: calibration.swingPlaneNormalZ,
+                    ballPositionX: calibration.ballPositionX,
+                    ballPositionY: calibration.ballPositionY,
+                    ballPositionZ: calibration.ballPositionZ,
+                    confidence: calibration.confidence,
+                    notes: calibration.notes,
+                    intrinsics: intrinsics
+                )
+            }
             return calibration
+        }
+
+        if let intrinsics {
+            let distance = session.environment.distanceMeters ?? lidarCalibration?.cameraToGroundDistance
+            let pixelsPerMetre = distance.map { $0 > 0 ? intrinsics.fx / $0 : nil } ?? nil
+            return CollectorCalibrationSnapshot(
+                status: "intrinsics_available",
+                method: "avfoundation_intrinsics",
+                source: "cmsamplebuffer_attachment",
+                distanceMeters: distance,
+                cameraHeightMeters: lidarCalibration?.cameraHeight ?? cameraHeightMeters,
+                cameraAngleDegrees: lidarCalibration?.cameraAngle ?? cameraAngleDegrees,
+                pixelsPerMetre: pixelsPerMetre,
+                groundPlaneY: lidarCalibration?.groundPlaneY,
+                clubLengthMeters: nil,
+                lieAngleDegrees: nil,
+                armLengthMeters: nil,
+                swingPlaneNormalX: nil,
+                swingPlaneNormalY: nil,
+                swingPlaneNormalZ: nil,
+                ballPositionX: nil,
+                ballPositionY: nil,
+                ballPositionZ: nil,
+                confidence: 0.85,
+                notes: "AVFoundation 实时投递 3×3 内参矩阵；需配合击球距离换算 pixels_per_metre。",
+                intrinsics: intrinsics
+            )
         }
 
         if let lidarCalibration {

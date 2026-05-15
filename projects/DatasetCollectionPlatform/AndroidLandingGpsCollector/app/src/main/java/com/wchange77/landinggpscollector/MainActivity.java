@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -41,6 +42,13 @@ public class MainActivity extends Activity {
     private static final int REQUEST_EXPORT = 1002;
 
     private EditText sessionNameInput;
+    private EditText takeIndexInput;
+    private EditText teeLatitudeInput;
+    private EditText teeLongitudeInput;
+    private EditText windSpeedInput;
+    private EditText windDirectionInput;
+    private EditText temperatureInput;
+    private EditText notesInput;
     private TextView statusText;
     private TextView historyText;
     private Location latestLocation;
@@ -95,11 +103,14 @@ public class MainActivity extends Activity {
         title.setTextColor(0xFF111111);
         root.addView(title);
 
-        sessionNameInput = new EditText(this);
-        sessionNameInput.setHint("会话名称，例如 1");
-        sessionNameInput.setSingleLine(true);
-        sessionNameInput.setText("1");
-        root.addView(sessionNameInput);
+        sessionNameInput = addTextField(root, "会话名称，例如 1", "1", InputType.TYPE_CLASS_TEXT);
+        takeIndexInput = addTextField(root, "本会话中的第几杆（1-50）", "1", InputType.TYPE_CLASS_NUMBER);
+        teeLatitudeInput = addTextField(root, "发射点纬度（可选，留空跳过 carry）", "", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        teeLongitudeInput = addTextField(root, "发射点经度（可选）", "", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        windSpeedInput = addTextField(root, "风速 m/s（可选）", "", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        windDirectionInput = addTextField(root, "风向 度（0-360，可选）", "", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        temperatureInput = addTextField(root, "气温 摄氏度（可选）", "", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        notesInput = addTextField(root, "备注（可选）", "", InputType.TYPE_CLASS_TEXT);
 
         statusText = new TextView(this);
         statusText.setTextSize(15);
@@ -110,6 +121,11 @@ public class MainActivity extends Activity {
         refreshButton.setText("刷新高精度 GPS");
         refreshButton.setOnClickListener(v -> startLocationUpdates());
         root.addView(refreshButton);
+
+        Button useCurrentAsTeeButton = new Button(this);
+        useCurrentAsTeeButton.setText("把当前位置设为发射点");
+        useCurrentAsTeeButton.setOnClickListener(v -> copyCurrentAsTee());
+        root.addView(useCurrentAsTeeButton);
 
         Button recordButton = new Button(this);
         recordButton.setText("记录落球点");
@@ -127,6 +143,29 @@ public class MainActivity extends Activity {
         root.addView(historyText);
 
         setContentView(scrollView);
+    }
+
+    private EditText addTextField(LinearLayout parent, String hint, String defaultValue, int inputType) {
+        EditText field = new EditText(this);
+        field.setHint(hint);
+        field.setSingleLine(true);
+        field.setInputType(inputType);
+        if (defaultValue != null && !defaultValue.isEmpty()) {
+            field.setText(defaultValue);
+        }
+        parent.addView(field);
+        return field;
+    }
+
+    private void copyCurrentAsTee() {
+        if (latestLocation == null) {
+            statusText.setText("尚无可用 GPS，先刷新定位再设为发射点");
+            startLocationUpdates();
+            return;
+        }
+        teeLatitudeInput.setText(String.format(Locale.US, "%.7f", latestLocation.getLatitude()));
+        teeLongitudeInput.setText(String.format(Locale.US, "%.7f", latestLocation.getLongitude()));
+        statusText.setText("已把当前位置写入发射点输入框");
     }
 
     private void requestLocationPermission() {
@@ -196,6 +235,17 @@ public class MainActivity extends Activity {
             statusText.setText("会话名称不能为空");
             return;
         }
+        int takeIndex;
+        try {
+            takeIndex = Integer.parseInt(takeIndexInput.getText().toString().trim());
+        } catch (NumberFormatException ex) {
+            statusText.setText("第几杆必须是整数");
+            return;
+        }
+        if (takeIndex <= 0 || takeIndex > 200) {
+            statusText.setText("第几杆超出合理范围 1-200");
+            return;
+        }
         if (latestLocation == null) {
             statusText.setText("还没有可用 GPS，请先刷新定位");
             startLocationUpdates();
@@ -203,39 +253,149 @@ public class MainActivity extends Activity {
         }
         try {
             JSONObject location = locationJson(latestLocation, "android_landing_point");
+            JSONObject teeLocation = parseTeeLocation();
+            Double carryMeters = null;
+            if (teeLocation != null) {
+                carryMeters = haversineMeters(
+                        teeLocation.getDouble("latitude"),
+                        teeLocation.getDouble("longitude"),
+                        latestLocation.getLatitude(),
+                        latestLocation.getLongitude()
+                );
+            }
+            Double windSpeed = parseOptionalDouble(windSpeedInput);
+            Double windDirection = parseOptionalDouble(windDirectionInput);
+            Double temperature = parseOptionalDouble(temperatureInput);
+            String userNotes = notesInput.getText().toString().trim();
+
             JSONObject reference = new JSONObject();
             reference.put("source", "android_landing_point");
             reference.put("device", deviceName());
             reference.put("capturedAt", nowIso8601());
             reference.put("clubSpeedMph", JSONObject.NULL);
             reference.put("ballSpeedMph", JSONObject.NULL);
-            reference.put("carryDistanceMeters", JSONObject.NULL);
-            reference.put("totalDistanceMeters", JSONObject.NULL);
+            reference.put("carryDistanceMeters", carryMeters != null ? carryMeters : JSONObject.NULL);
+            reference.put("totalDistanceMeters", carryMeters != null ? carryMeters : JSONObject.NULL);
             reference.put("launchAngleDegrees", JSONObject.NULL);
             reference.put("spinRateRpm", JSONObject.NULL);
             reference.put("landingLocation", location);
-            reference.put("notes", "小米旗舰机记录落球点 GPS");
+            reference.put("notes", buildNotes(userNotes, carryMeters, windSpeed, windDirection, temperature));
 
             JSONArray measurements = new JSONArray();
             measurements.put(reference);
 
             JSONObject record = new JSONObject();
             record.put("sessionName", sessionName);
+            record.put("takeIndex", takeIndex);
             record.put("capturedAt", nowIso8601());
             record.put("source", "android_landing_point");
             record.put("device", deviceName());
             record.put("landingLocation", location);
+            if (teeLocation != null) {
+                record.put("teeLocation", teeLocation);
+            }
+            if (carryMeters != null) {
+                record.put("carryDistanceMeters", carryMeters);
+            }
+            if (windSpeed != null) {
+                record.put("windSpeedMps", windSpeed);
+            }
+            if (windDirection != null) {
+                record.put("windDirectionDegrees", windDirection);
+            }
+            if (temperature != null) {
+                record.put("temperatureCelsius", temperature);
+            }
+            if (!userNotes.isEmpty()) {
+                record.put("userNotes", userNotes);
+            }
             record.put("referenceMeasurements", measurements);
 
             try (FileOutputStream out = new FileOutputStream(dataFile(), true)) {
                 out.write(record.toString().getBytes(StandardCharsets.UTF_8));
                 out.write('\n');
             }
+            int nextTake = takeIndex + 1;
+            takeIndexInput.setText(String.valueOf(nextTake));
             refreshHistory();
-            statusText.setText("已记录落球点 GPS");
+            if (carryMeters != null) {
+                statusText.setText(String.format(Locale.US, "已记录第 %d 杆 · carry %.1f m", takeIndex, carryMeters));
+            } else {
+                statusText.setText(String.format(Locale.US, "已记录第 %d 杆（无发射点，未算 carry）", takeIndex));
+            }
         } catch (Exception ex) {
             statusText.setText("记录失败: " + ex.getMessage());
         }
+    }
+
+    private JSONObject parseTeeLocation() throws Exception {
+        String latRaw = teeLatitudeInput.getText().toString().trim();
+        String lonRaw = teeLongitudeInput.getText().toString().trim();
+        if (latRaw.isEmpty() || lonRaw.isEmpty()) {
+            return null;
+        }
+        double latitude = Double.parseDouble(latRaw);
+        double longitude = Double.parseDouble(lonRaw);
+        JSONObject json = new JSONObject();
+        json.put("latitude", latitude);
+        json.put("longitude", longitude);
+        json.put("horizontalAccuracyMeters", 0.0);
+        json.put("altitudeMeters", JSONObject.NULL);
+        json.put("verticalAccuracyMeters", JSONObject.NULL);
+        json.put("capturedAt", nowIso8601());
+        json.put("source", "manual_tee_entry");
+        return json;
+    }
+
+    private Double parseOptionalDouble(EditText field) {
+        String raw = field.getText().toString().trim();
+        if (raw.isEmpty()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(raw);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private String buildNotes(String userNotes, Double carry, Double windSpeed, Double windDir, Double temperature) {
+        StringBuilder builder = new StringBuilder();
+        if (carry != null) {
+            builder.append(String.format(Locale.US, "carry=%.1fm", carry));
+        }
+        if (windSpeed != null) {
+            if (builder.length() > 0) builder.append("; ");
+            builder.append(String.format(Locale.US, "wind=%.1fm/s", windSpeed));
+        }
+        if (windDir != null) {
+            if (builder.length() > 0) builder.append("; ");
+            builder.append(String.format(Locale.US, "windDir=%.0f°", windDir));
+        }
+        if (temperature != null) {
+            if (builder.length() > 0) builder.append("; ");
+            builder.append(String.format(Locale.US, "temp=%.1f°C", temperature));
+        }
+        if (!userNotes.isEmpty()) {
+            if (builder.length() > 0) builder.append("; ");
+            builder.append(userNotes);
+        }
+        if (builder.length() == 0) {
+            return "android landing gps";
+        }
+        return builder.toString();
+    }
+
+    private static double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
+        double earthRadius = 6371008.8;
+        double phi1 = Math.toRadians(lat1);
+        double phi2 = Math.toRadians(lat2);
+        double dPhi = Math.toRadians(lat2 - lat1);
+        double dLambda = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dPhi / 2) * Math.sin(dPhi / 2)
+                + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return earthRadius * c;
     }
 
     private JSONObject locationJson(Location location, String source) throws Exception {
@@ -305,14 +465,19 @@ public class MainActivity extends Activity {
                 count++;
                 JSONObject object = new JSONObject(line);
                 JSONObject location = object.getJSONObject("landingLocation");
-                builder.append(count)
-                        .append(". ")
-                        .append(object.optString("sessionName"))
-                        .append("  ")
-                        .append(String.format(Locale.US, "%.6f, %.6f", location.getDouble("latitude"), location.getDouble("longitude")))
-                        .append("  ")
-                        .append(object.optString("capturedAt"))
-                        .append('\n');
+                int take = object.optInt("takeIndex", -1);
+                double carry = object.optDouble("carryDistanceMeters", Double.NaN);
+                builder.append(count).append(". ")
+                        .append(object.optString("sessionName"));
+                if (take > 0) {
+                    builder.append("#").append(take);
+                }
+                builder.append("  ")
+                        .append(String.format(Locale.US, "%.6f, %.6f", location.getDouble("latitude"), location.getDouble("longitude")));
+                if (!Double.isNaN(carry)) {
+                    builder.append(String.format(Locale.US, "  carry %.1fm", carry));
+                }
+                builder.append("  ").append(object.optString("capturedAt")).append('\n');
             }
         } catch (Exception ex) {
             builder.append("读取失败: ").append(ex.getMessage());
@@ -352,3 +517,4 @@ public class MainActivity extends Activity {
         }
     }
 }
+

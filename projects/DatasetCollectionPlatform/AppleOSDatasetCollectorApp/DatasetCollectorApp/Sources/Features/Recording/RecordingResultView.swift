@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct RecordingResultView: View {
+    @Bindable var coordinator: RecordingCoordinator
     let result: ValidationResult
     let registeredSampleIds: [String]
-    let referenceMeasurements: [CollectorReferenceMeasurement]
     let isSaving: Bool
     let hasSaved: Bool
     let saveStatusMessage: String?
@@ -13,6 +13,10 @@ struct RecordingResultView: View {
     let onRetry: () -> Void
     let onDone: () -> Void
     let onPlaybackAnalysis: () -> Void
+
+    private var referenceMeasurements: [CollectorReferenceMeasurement] {
+        coordinator.referenceMeasurements
+    }
 
     var body: some View {
         ScrollView {
@@ -66,7 +70,11 @@ struct RecordingResultView: View {
             .padding(.horizontal, 24)
 
             if result.passed {
-                referencePreviewSection
+                if hasSaved {
+                    referencePreviewSection
+                } else {
+                    referenceEntrySection
+                }
             }
 
             if result.passed {
@@ -90,7 +98,7 @@ struct RecordingResultView: View {
                     .disabled(isSaving || hasSaved)
                     .padding(.horizontal, 24)
 
-                    Text("保存会写入视频样本、质量 sidecar，并附带录制前填写的 TrackMan/参考数据。")
+                    Text("保存会写入视频样本、质量 sidecar，并附带上方填写的 TrackMan/参考数据。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 24)
@@ -173,6 +181,82 @@ struct RecordingResultView: View {
             }
             .padding(.top, 24)
         }
+    }
+
+    private var referenceEntrySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("TrackMan / 雷达参考数据")
+                .font(.headline)
+            Text("录完后对照 TrackMan 屏读录入；全部留空也可以保存，届时样本不会附带参考测量。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("参考设备")
+                Spacer()
+                TextField("TrackMan 4 / 雷达", text: $coordinator.metadata.referenceDevice)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            HStack {
+                Text("杆头速度")
+                Spacer()
+                TextField("mph", text: $coordinator.metadata.radarClubSpeedMph)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+            }
+
+            HStack {
+                Text("球速")
+                Spacer()
+                TextField("mph", text: $coordinator.metadata.radarBallSpeedMph)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+            }
+
+            HStack {
+                Text("Carry")
+                Spacer()
+                TextField("米", text: $coordinator.metadata.carryDistanceMeters)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+            }
+
+            HStack {
+                Text("总距离")
+                Spacer()
+                TextField("米", text: $coordinator.metadata.totalDistanceMeters)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+            }
+
+            HStack {
+                Text("起飞角")
+                Spacer()
+                TextField("度", text: $coordinator.metadata.launchAngleDegrees)
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+            }
+
+            HStack {
+                Text("倒旋")
+                Spacer()
+                TextField("rpm", text: $coordinator.metadata.spinRateRpm)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+            }
+
+            TextField("参考数据备注（风速/风向/气温等）", text: $coordinator.metadata.referenceNotes, axis: .vertical)
+        }
+        .padding()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 24)
     }
 
     private var referencePreviewSection: some View {

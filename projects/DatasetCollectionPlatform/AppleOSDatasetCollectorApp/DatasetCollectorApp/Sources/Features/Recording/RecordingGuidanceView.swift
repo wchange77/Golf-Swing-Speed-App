@@ -20,6 +20,7 @@ struct RecordingGuidanceView: View {
         case .guidanceStep3:
             GuidanceStep3View(
                 coordinator: coordinator,
+                cameraManager: cameraManager,
                 session: session,
                 onStart: { coordinator.startRecording() }
             )
@@ -120,22 +121,12 @@ private struct GuidanceStep2View: View {
             CameraPreviewView(session: cameraManager.captureSession)
                 .ignoresSafeArea()
 
-            if !humanDetected {
-                VStack {
-                    Spacer()
-                    Image(systemName: "figure.stand")
-                        .font(.system(size: 120))
-                        .foregroundStyle(.white.opacity(0.3))
-                    Spacer()
-                }
-            }
-
             VStack {
                 VStack(spacing: 8) {
-                    Text("第 2 步：确认人在画面中")
+                    Text("第 2 步：确认画面构图")
                         .font(.headline)
                         .foregroundStyle(.white)
-                    Text("请让挥杆者站到画面中央")
+                    Text("请把击球位摆进画面中央，光线充足即可")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.8))
                 }
@@ -146,11 +137,11 @@ private struct GuidanceStep2View: View {
                 Spacer()
 
                 HStack(spacing: 12) {
-                    Image(systemName: humanDetected ? "checkmark.circle.fill" : "xmark.circle")
+                    Image(systemName: humanDetected ? "checkmark.circle.fill" : "eye")
                         .font(.title2)
-                        .foregroundStyle(humanDetected ? .green : .red)
-                    Text(humanDetected ? "已检测到人体" : "未检测到人体，请站入画面")
-                        .font(.headline)
+                        .foregroundStyle(humanDetected ? .green : .white)
+                    Text(humanDetected ? "已检测到人体（仅参考）" : "无需人体检测，画面就绪即可继续")
+                        .font(.subheadline)
                         .foregroundStyle(.white)
                 }
                 .padding()
@@ -163,8 +154,6 @@ private struct GuidanceStep2View: View {
                         .padding()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!humanDetected)
-                .opacity(humanDetected ? 1 : 0.5)
                 .padding(.horizontal, 24)
             }
             .padding(.bottom, 32)
@@ -177,8 +166,12 @@ private struct GuidanceStep2View: View {
 
 private struct GuidanceStep3View: View {
     @Bindable var coordinator: RecordingCoordinator
+    @ObservedObject var cameraManager: DatasetCameraManager
     let session: CollectorSessionRecord?
     let onStart: () -> Void
+
+    @StateObject private var lidarManager = LiDARCalibrationManager()
+    @State private var isCalibrating: Bool = false
 
     private var canStart: Bool {
         coordinator.canStartRecording(session: session)
@@ -200,7 +193,7 @@ private struct GuidanceStep3View: View {
                     Text("采集域")
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("人体球杆 + 球检测")
+                    Text(sessionDomainsText)
                         .fontWeight(.medium)
                 }
 
@@ -282,77 +275,19 @@ private struct GuidanceStep3View: View {
                         .frame(width: 90)
                 }
 
-                Divider()
-
-                HStack {
-                    Text("TrackMan/参考设备")
-                    Spacer()
-                    TextField("TrackMan 4 / 雷达", text: $coordinator.metadata.referenceDevice)
-                        .multilineTextAlignment(.trailing)
-                }
-
-                HStack {
-                    Text("杆头速度")
-                    Spacer()
-                    TextField("mph", text: $coordinator.metadata.radarClubSpeedMph)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 90)
-                }
-
-                HStack {
-                    Text("球速")
-                    Spacer()
-                    TextField("mph", text: $coordinator.metadata.radarBallSpeedMph)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 90)
-                }
-
-                HStack {
-                    Text("Carry")
-                    Spacer()
-                    TextField("米", text: $coordinator.metadata.carryDistanceMeters)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 90)
-                }
-
-                HStack {
-                    Text("总距离")
-                    Spacer()
-                    TextField("米", text: $coordinator.metadata.totalDistanceMeters)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 90)
-                }
-
-                HStack {
-                    Text("起飞角")
-                    Spacer()
-                    TextField("度", text: $coordinator.metadata.launchAngleDegrees)
-                        .keyboardType(.numbersAndPunctuation)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 90)
-                }
-
-                HStack {
-                    Text("倒旋")
-                    Spacer()
-                    TextField("rpm", text: $coordinator.metadata.spinRateRpm)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 90)
-                }
-
-                TextField("参考数据备注", text: $coordinator.metadata.referenceNotes, axis: .vertical)
+                Text("TrackMan/雷达参数在录制结束后填写，此处只需要设置相机与杆型。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .padding()
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal, 24)
 
+            lidarCalibrationSection
+                .padding(.horizontal, 24)
+
             if !canStart {
-                Text("请确认人体检测、3-5 米距离、三脚架、场景/光照和标定基础信息后再录制")
+                Text("请确认 3-5 米距离、三脚架、场景/光照和标定基础信息后再录制")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .padding(.horizontal, 24)
@@ -382,6 +317,101 @@ private struct GuidanceStep3View: View {
         guard let environment = session?.environment else { return "未记录" }
         let distance = environment.distanceMeters.map { String(format: "%.1f 米", $0) } ?? "未记录"
         return "\(distance) / \(environment.tripod ? "三脚架" : "非三脚架")"
+    }
+
+    private var sessionDomainsText: String {
+        guard let targets = session?.targetDomains, !targets.isEmpty else { return "未指定" }
+        return targets.compactMap { DatasetDomain(rawValue: $0)?.title ?? $0 }.joined(separator: " + ")
+    }
+
+    @ViewBuilder
+    private var lidarCalibrationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "scanner")
+                    .foregroundStyle(.blue)
+                Text("LiDAR 标定")
+                    .font(.headline)
+                if coordinator.lidarCalibration != nil {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                }
+                Spacer()
+            }
+
+            Text(lidarStatusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Button {
+                    runLiDARCalibration()
+                } label: {
+                    HStack {
+                        if isCalibrating {
+                            ProgressView().tint(.primary)
+                        }
+                        Image(systemName: coordinator.lidarCalibration == nil ? "dot.viewfinder" : "arrow.clockwise")
+                        Text(coordinator.lidarCalibration == nil ? "执行 LiDAR 标定" : "重新标定")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isCalibrating || !lidarManager.isSupported)
+
+                if isCalibrating {
+                    Button("取消") {
+                        lidarManager.cancel()
+                        isCalibrating = false
+                    }
+                    .buttonStyle(.borderless)
+                }
+
+                if coordinator.lidarCalibration != nil && !isCalibrating {
+                    Button("跳过标定") {
+                        coordinator.setLiDARCalibration(nil)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            if !lidarManager.isSupported {
+                Text("当前设备不支持 ARKit LiDAR，可跳过")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            } else {
+                Text("标定会短暂使用相机与地平面检测，完成后自动释放给 240fps 录制。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var lidarStatusText: String {
+        if let data = coordinator.lidarCalibration {
+            return String(
+                format: "已记录：相机高度 %.2f 米 / 距地 %.2f 米 / 俯仰 %.1f°",
+                data.cameraHeight,
+                data.cameraToGroundDistance,
+                data.cameraAngle
+            )
+        }
+        return lidarManager.status.message
+    }
+
+    private func runLiDARCalibration() {
+        guard !isCalibrating else { return }
+        isCalibrating = true
+        cameraManager.stopSession()
+        Task {
+            let result = await lidarManager.runStaticCalibration()
+            if let result {
+                coordinator.setLiDARCalibration(result)
+            }
+            cameraManager.startSession()
+            isCalibrating = false
+        }
     }
 }
 

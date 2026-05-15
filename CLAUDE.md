@@ -41,6 +41,16 @@ python tools/generate_manifest.py
 python tools/generate_quality_report.py
 python tools/validate_registry.py --strict
 
+# 抽帧 + 半自动标注 + 训练集导出
+python tools/extract_frames.py --domain golf_ball_detection --mode impact_window --fps 10
+python tools/prelabel_yolo.py --source vision       # 或 --source ultralytics --weights best.pt
+python tools/prelabel_pose.py
+python tools/export_to_labelstudio.py --domain golf_ball_detection
+# (在 Label Studio 里校正，导出 JSON)
+python tools/import_from_labelstudio.py --input ls_export.json --domain golf_ball_detection
+python tools/export_yolo_dataset.py --write-yaml ../../tools/train_ball_detector/golf_ball.yaml
+python tools/export_coco_keypoints.py
+
 # AppleOS 工程校验（无需 Mac/Xcode）
 python tools/validate_apple_project.py
 # 模拟 iOS 采集全链路
@@ -98,15 +108,18 @@ python projects/PiTracIPhoneFeasibilityStudy/tools/build_gap_report.py
 - **Trajectory**：LaunchConditionEstimator + EnvironmentModel + TrajectoryPhysicsModel（RK4 积分 + 空气阻力 + Magnus 效应）+ BezierTrajectoryModel + TrajectoryPredictor
 - **Session**：SwingSession + SwingSessionStore（JSONL 持久化）+ PersonalStatsCalculator + InsightEngine
 - **Analysis**：LagAnalyser + BodyPoseFrame
+- **Audio**：OfflineAudioAnalyser（AVAssetReader + vDSP FFT，离线读 .mov 音轨定位 impact 瞬间，2-5kHz 高频带）
+- **Calibration**：IntrinsicsCalibrationManager（读 iOS camera.json 的 intrinsics 块，fx/fy/cx/cy + pixelsPerMetre）
 
 ### 数据平台核心链路
 
 `采集会话 → 样本注册(SHA-256去重) → 会话隔离切分 → 清单导出 → 质量校验`
 
-- 注册表：`datasets/registry/{sessions,samples,duplicates}.jsonl`
+- 注册表：`datasets/registry/{sessions,samples,duplicates,frames_index,prelabels_manifest,annotations}.jsonl`
 - 契约 schema：`contracts/{session_record,sample_record,dataset_manifest}.schema.json`
 - 消费者清单：`exports/consumers/{human_club_analysis_app,golf_ball_detection_app,pitrac_feasibility_study}.json`
-- 工具库核心：`tools/lib/registry.py`
+- 工具库核心：`tools/lib/registry.py`（含 `list_samples` / `annotation_path_for` / `upsert_annotation_record` / `annotation_coverage`）
+- 半自动标注链：extract_frames → prelabel_yolo / prelabel_pose → export_to_labelstudio → Label Studio 校正 → import_from_labelstudio → export_yolo_dataset / export_coco_keypoints
 
 （以上路径均相对于 `projects/DatasetCollectionPlatform/`）
 

@@ -61,22 +61,55 @@ struct DatasetCollectorView: View {
                     TextField("备注", text: $viewModel.notes, axis: .vertical)
                 }
 
+                Section("目标域") {
+                    ForEach(DatasetDomain.allCases) { domain in
+                        Toggle(domain.title, isOn: Binding(
+                            get: { viewModel.targetDomains.contains(domain) },
+                            set: { isOn in
+                                if isOn {
+                                    viewModel.targetDomains.insert(domain)
+                                } else {
+                                    viewModel.targetDomains.remove(domain)
+                                }
+                            }
+                        ))
+                    }
+                    Text("两域都选即一次采集同时服务人体分析和球检测；只选其一可做专项采集。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("会话控制") {
                     Button("创建采集会话") {
-                        locationManager.requestLocation()
                         viewModel.createSession(location: locationManager.latestLocation)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!viewModel.canCreateSession || locationManager.latestLocation == nil)
+                    .disabled(!viewModel.canCreateSession)
 
                     if !viewModel.canCreateSession {
                         Text(viewModel.sessionValidationMessage)
                             .font(.caption)
                             .foregroundStyle(.red)
-                    } else if locationManager.latestLocation == nil {
-                        Text("创建会话前必须获取当前 GPS 定位")
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                    }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            locationManager.requestPermissionAndLocation()
+                        } label: {
+                            HStack {
+                                if locationManager.isFetching {
+                                    ProgressView().tint(.primary)
+                                }
+                                Text(locationManager.latestLocation == nil ? "获取 GPS" : "刷新 GPS")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(locationManager.isFetching)
+
+                        if locationManager.isFetching {
+                            Button("跳过") { locationManager.cancel() }
+                                .buttonStyle(.borderless)
+                        }
                     }
 
                     if let session = viewModel.activeSession {
@@ -85,6 +118,10 @@ struct DatasetCollectorView: View {
                             .foregroundStyle(.secondary)
                         if let location = session.location {
                             Text(String(format: "GPS: %.6f, %.6f / 精度 %.1f 米", location.latitude, location.longitude, location.horizontalAccuracyMeters))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("本会话未记录 GPS（室内或信号不足）")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -171,9 +208,9 @@ struct DatasetCollectorView: View {
             case .result:
                 if let result = coordinator.validationResult {
                     RecordingResultView(
+                        coordinator: coordinator,
                         result: result,
                         registeredSampleIds: registeredSampleIds,
-                        referenceMeasurements: coordinator.referenceMeasurements,
                         isSaving: isSavingRecording,
                         hasSaved: hasSavedRecording,
                         saveStatusMessage: saveStatusMessage,
@@ -227,6 +264,8 @@ struct DatasetCollectorView: View {
                     captureTimestamps: cameraManager.capturedTimestamps,
                     depthSamples: depthSamples,
                     lidarCalibration: coordinator.lidarCalibration,
+                    intrinsics: cameraManager.capturedIntrinsics,
+                    audioStats: cameraManager.capturedAudioStats,
                     hasLiDAR: cameraManager.hasLiDAR,
                     referenceMeasurements: coordinator.referenceMeasurements
                 )

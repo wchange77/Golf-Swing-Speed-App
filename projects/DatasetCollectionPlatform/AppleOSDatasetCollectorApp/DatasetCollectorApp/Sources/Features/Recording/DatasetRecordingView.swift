@@ -85,6 +85,9 @@ struct DatasetRecordingView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundStyle(.white)
+                Text("录完后按停止，60 秒安全阀自动截断")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
             }
 
             Spacer()

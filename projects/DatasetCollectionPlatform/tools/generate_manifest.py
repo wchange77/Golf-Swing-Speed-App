@@ -12,6 +12,7 @@ from lib.registry import (
     SAMPLES_FILE,
     SESSION_SCHEMA_FILE,
     SESSIONS_FILE,
+    annotation_coverage,
     read_jsonl,
     validate_with_schema,
 )
@@ -72,6 +73,9 @@ def main() -> None:
     for key, path, fmt in DOMAINS:
         domain_rows = [r for r in sample_rows if r.get("domain") == key]
         split = read_split_counts(key)
+        coverages = [annotation_coverage(r["sampleId"]) for r in domain_rows] if domain_rows else []
+        avg_coverage = round(sum(coverages) / len(coverages), 4) if coverages else 0.0
+        labeled_samples = sum(1 for c in coverages if c > 0)
         datasets.append(
             {
                 "key": key,
@@ -81,6 +85,8 @@ def main() -> None:
                 "duplicateFiltered": len([d for d in duplicate_rows if d.get("domain") == key]),
                 "splitFile": f"exports/splits/{key}.json",
                 "split": split,
+                "annotationCoverage": avg_coverage,
+                "labeledSamples": labeled_samples,
             }
         )
 

@@ -20,14 +20,18 @@
 	<string>1</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Dataset Collector needs camera access to capture dataset samples.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Dataset Collector may use microphone for audio-triggered recording.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Dataset Collector records GPS coordinates for each collection session.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>同步录制挥杆音频用于 Impact 检测。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Dataset Collector needs permission to export captured dataset files.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Dataset Collector needs access to photo library for dataset export/import.</string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiresFullScreen</key>

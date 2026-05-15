@@ -38,17 +38,16 @@ final class RecordingCoordinator {
     private(set) var recordingDuration: TimeInterval = 0
     private(set) var humanDetected = false
     private(set) var lidarCalibration: LiDARCalibrationData?
-    private(set) var referenceMeasurementsSnapshot: [CollectorReferenceMeasurement] = []
 
     var metadata = RecordingMetadata()
 
     private let cameraManager: DatasetCameraManager
     private let validator = RecordingValidator()
     private var countdownTask: Task<Void, Never>?
-    private var autoStopTask: Task<Void, Never>?
+    private var safetyStopTask: Task<Void, Never>?
     private var recordingStartTime: Date?
 
-    private let maxRecordingDuration: TimeInterval = 4.0
+    private let maxRecordingDuration: TimeInterval = 60.0
     private let countdownSeconds = 3
 
     init(cameraManager: DatasetCameraManager) {
@@ -67,7 +66,6 @@ final class RecordingCoordinator {
 
     func startRecording() {
         guard state == .guidanceStep3, metadataIsComplete else { return }
-        referenceMeasurementsSnapshot = makeReferenceMeasurements(capturedAt: DatasetCollectorDateFormatter.nowISO8601())
         state = .countdown(countdownSeconds)
         countdownTask = Task {
             for i in stride(from: countdownSeconds, through: 1, by: -1) {
@@ -81,32 +79,30 @@ final class RecordingCoordinator {
 
     func stopRecording() {
         guard state == .recording else { return }
-        autoStopTask?.cancel()
-        autoStopTask = nil
+        safetyStopTask?.cancel()
+        safetyStopTask = nil
         Task { await finishCapture() }
     }
 
     func reset() {
         countdownTask?.cancel()
-        autoStopTask?.cancel()
+        safetyStopTask?.cancel()
         countdownTask = nil
-        autoStopTask = nil
+        safetyStopTask = nil
         state = .guidanceStep1
         validationResult = nil
         recordedVideoURL = nil
         recordingDuration = 0
         humanDetected = false
-        referenceMeasurementsSnapshot = []
     }
 
     func retryRecording() {
         countdownTask?.cancel()
-        autoStopTask?.cancel()
+        safetyStopTask?.cancel()
         state = .guidanceStep3
         validationResult = nil
         recordedVideoURL = nil
         recordingDuration = 0
-        referenceMeasurementsSnapshot = []
     }
 
     func setHumanDetected(_ detected: Bool) {
@@ -118,10 +114,7 @@ final class RecordingCoordinator {
     }
 
     var referenceMeasurements: [CollectorReferenceMeasurement] {
-        if !referenceMeasurementsSnapshot.isEmpty {
-            return referenceMeasurementsSnapshot
-        }
-        return makeReferenceMeasurements(capturedAt: DatasetCollectorDateFormatter.nowISO8601())
+        makeReferenceMeasurements(capturedAt: DatasetCollectorDateFormatter.nowISO8601())
     }
 
     private func makeReferenceMeasurements(capturedAt: String) -> [CollectorReferenceMeasurement] {
@@ -203,7 +196,7 @@ final class RecordingCoordinator {
             recordingStartTime = Date()
             state = .recording
 
-            autoStopTask = Task {
+            safetyStopTask = Task {
                 try? await Task.sleep(for: .seconds(maxRecordingDuration))
                 guard !Task.isCancelled else { return }
                 await finishCapture()

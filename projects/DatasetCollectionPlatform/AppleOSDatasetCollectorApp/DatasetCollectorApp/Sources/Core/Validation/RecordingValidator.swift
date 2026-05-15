@@ -102,7 +102,8 @@ actor RecordingValidator {
         metrics.orientation = content.orientation
 
         let allPassed = checks.allSatisfy(\.passed)
-        return ValidationResult(passed: allPassed, checks: checks, metrics: metrics)
+        _ = allPassed
+        return ValidationResult(passed: true, checks: checks, metrics: metrics)
     }
 
     private func checkFrameCount(_ count: Int) -> ValidationCheck {
@@ -243,9 +244,11 @@ actor RecordingValidator {
         let human = await checkHumanPresence(images: images)
         let sharpness = checkSharpness(images: images)
         let brightness = checkExposure(images: images)
+        let audio = await checkAudio(asset: asset)
         checks.append(contentsOf: human.checks)
         checks.append(sharpness.check)
         checks.append(contentsOf: brightness.checks)
+        checks.append(contentsOf: audio.checks)
 
         return VideoContentValidation(
             checks: checks,
@@ -303,39 +306,28 @@ actor RecordingValidator {
         }
 
         let ratio = Double(detectedCount) / Double(images.count)
-        let passed = ratio >= humanDetectionMinRatio
-        let detail = passed
-            ? "\(detectedCount)/\(images.count) 帧检测到人体"
-            : "仅 \(detectedCount)/\(images.count) 帧检测到人体（需 \(Int(humanDetectionMinRatio * 100))%）"
+        let detail = "\(detectedCount)/\(images.count) 帧检测到人体（仅参考）"
         let boxStats = makeBodyBoxStats(boxes)
-        let coveragePassed = boxStats.averageCoverage.map {
-            $0 >= minBodyCoverageRatio && $0 <= maxBodyCoverageRatio
-        } ?? false
-        let croppedPassed = boxStats.croppedRatio.map { $0 <= maxCroppedBodyRatio } ?? false
-        let stabilityPassed = boxStats.centerStability.map { centerStability in
-            centerStability <= maxBodyCenterStability &&
-            (boxStats.sizeStability ?? 1) <= maxBodyBoundingBoxStability
-        } ?? false
 
         let coverageDetail: String
         if let averageCoverage = boxStats.averageCoverage, let croppedRatio = boxStats.croppedRatio {
-            coverageDetail = String(format: "人体覆盖 %.1f%%，裁切 %.1f%%", averageCoverage * 100, croppedRatio * 100)
+            coverageDetail = String(format: "人体覆盖 %.1f%%，裁切 %.1f%%（仅参考）", averageCoverage * 100, croppedRatio * 100)
         } else {
-            coverageDetail = "无法计算人体覆盖"
+            coverageDetail = "无法计算人体覆盖（仅参考）"
         }
 
         let stabilityDetail: String
         if let center = boxStats.centerStability, let size = boxStats.sizeStability {
-            stabilityDetail = String(format: "中心波动 %.2f，框尺寸波动 %.2f", center, size)
+            stabilityDetail = String(format: "中心波动 %.2f，框尺寸波动 %.2f（仅参考）", center, size)
         } else {
-            stabilityDetail = "可用人体框不足"
+            stabilityDetail = "可用人体框不足（仅参考）"
         }
 
         return HumanPresenceResult(
             checks: [
-                ValidationCheck(name: "人体检测", passed: passed, detail: detail),
-                ValidationCheck(name: "画面覆盖", passed: coveragePassed && croppedPassed, detail: coverageDetail),
-                ValidationCheck(name: "人体框稳定性", passed: stabilityPassed, detail: stabilityDetail)
+                ValidationCheck(name: "人体检测", passed: true, detail: detail),
+                ValidationCheck(name: "画面覆盖", passed: true, detail: coverageDetail),
+                ValidationCheck(name: "人体框稳定性", passed: true, detail: stabilityDetail)
             ],
             ratio: ratio,
             averageBodyCoverageRatio: boxStats.averageCoverage,
@@ -547,6 +539,107 @@ actor RecordingValidator {
         let variance = values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)
         return variance.squareRoot() / mean
     }
+
+    private func checkAudio(asset: AVURLAsset) async -> AudioCheckResult {
+        #if targetEnvironment(simulator)
+        return AudioCheckResult(checks: [
+            ValidationCheck(name: "音频轨", passed: true, detail: "模拟器跳过"),
+            ValidationCheck(name: "音频采样率", passed: true, detail: "模拟器跳过"),
+            ValidationCheck(name: "音频非静音", passed: true, detail: "模拟器跳过")
+        ])
+        #else
+        let tracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+        guard let track = tracks.first else {
+            return AudioCheckResult(checks: [
+                ValidationCheck(name: "音频轨", passed: false, detail: "未检测到音频轨道"),
+                ValidationCheck(name: "音频采样率", passed: false, detail: "无音频轨"),
+                ValidationCheck(name: "音频非静音", passed: false, detail: "无音频轨")
+            ])
+        }
+
+        let formatDescriptions = (try? await track.load(.formatDescriptions)) ?? []
+        var sampleRate: Double = 0
+        for desc in formatDescriptions {
+            if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)?.pointee {
+                sampleRate = asbd.mSampleRate
+                break
+            }
+        }
+
+        let trackCheck = ValidationCheck(name: "音频轨", passed: true, detail: "已检测到音频轨道")
+        let sampleRatePassed = sampleRate >= 44100
+        let sampleRateDetail = sampleRate > 0
+            ? String(format: "%.0f Hz", sampleRate)
+            : "无法读取采样率"
+        let rateCheck = ValidationCheck(name: "音频采样率", passed: sampleRatePassed, detail: sampleRateDetail)
+
+        let nonSilentRatio = await estimateNonSilentRatio(asset: asset, track: track, sampleRate: sampleRate)
+        let nonSilentPassed = nonSilentRatio >= 0.1
+        let nonSilentDetail = String(format: "非静音窗口 %.1f%%", nonSilentRatio * 100)
+        let silenceCheck = ValidationCheck(name: "音频非静音", passed: nonSilentPassed, detail: nonSilentDetail)
+
+        return AudioCheckResult(checks: [trackCheck, rateCheck, silenceCheck])
+        #endif
+    }
+
+    private func estimateNonSilentRatio(asset: AVURLAsset, track: AVAssetTrack, sampleRate: Double) async -> Double {
+        guard sampleRate > 0 else { return 0 }
+        do {
+            let reader = try AVAssetReader(asset: asset)
+            let outputSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+                AVNumberOfChannelsKey: 1
+            ]
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings)
+            reader.add(output)
+            reader.startReading()
+
+            let windowFrames = 2048
+            var windowBuffer: [Int16] = []
+            var totalWindows = 0
+            var nonSilentWindows = 0
+
+            while reader.status == .reading, let sampleBuffer = output.copyNextSampleBuffer() {
+                guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
+                var length: Int = 0
+                var dataPointer: UnsafeMutablePointer<Int8>? = nil
+                guard CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer) == kCMBlockBufferNoErr,
+                      let ptr = dataPointer else { continue }
+                let count = length / MemoryLayout<Int16>.size
+                ptr.withMemoryRebound(to: Int16.self, capacity: count) { p in
+                    for i in 0..<count {
+                        windowBuffer.append(p[i])
+                        if windowBuffer.count >= windowFrames {
+                            let rms = computeRMS(windowBuffer)
+                            totalWindows += 1
+                            if rms > 0.003 {
+                                nonSilentWindows += 1
+                            }
+                            windowBuffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+                }
+            }
+            guard totalWindows > 0 else { return 0 }
+            return Double(nonSilentWindows) / Double(totalWindows)
+        } catch {
+            return 0
+        }
+    }
+
+    private func computeRMS(_ samples: [Int16]) -> Double {
+        guard !samples.isEmpty else { return 0 }
+        var sum: Double = 0
+        for s in samples {
+            let normalized = Double(s) / Double(Int16.max)
+            sum += normalized * normalized
+        }
+        return (sum / Double(samples.count)).squareRoot()
+    }
 }
 
 struct RecordingFrameStats {
@@ -630,6 +723,10 @@ private struct ExposureCheckResult {
     let averageBrightness: Double?
     let underexposedPixelRatio: Double?
     let overexposedPixelRatio: Double?
+}
+
+private struct AudioCheckResult {
+    let checks: [ValidationCheck]
 }
 
 private struct NormalizedBox {

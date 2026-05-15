@@ -141,9 +141,24 @@ struct CollectorSidecarPaths: Codable {
     let quality: String?
     let camera: String?
     let labelCandidates: String?
+    let audio: String?
+
+    init(
+        timeline: String?,
+        quality: String?,
+        camera: String?,
+        labelCandidates: String?,
+        audio: String? = nil
+    ) {
+        self.timeline = timeline
+        self.quality = quality
+        self.camera = camera
+        self.labelCandidates = labelCandidates
+        self.audio = audio
+    }
 
     var all: [String] {
-        [timeline, quality, camera, labelCandidates].compactMap { $0 }
+        [timeline, quality, camera, labelCandidates, audio].compactMap { $0 }
     }
 }
 
@@ -218,7 +233,7 @@ struct CollectorQualityThresholds: Codable {
     static let baseline = CollectorQualityThresholds(
         minFrameCount: 120,
         minDurationSeconds: 0.5,
-        maxDurationSeconds: 4.0,
+        maxDurationSeconds: 60.0,
         maxFrameRateJitterPercent: 15.0,
         minHumanDetectionRatio: 0.8,
         minSharpness: 8.0,
@@ -267,6 +282,7 @@ struct CollectorCameraSidecar: Codable {
     let hasLiDAR: Bool
     let calibration: CollectorCalibrationSnapshot
     let lidarCalibration: LiDARCalibrationData?
+    let intrinsics: CameraIntrinsicsSample?
 }
 
 struct CollectorCalibrationSnapshot: Codable {
@@ -288,6 +304,66 @@ struct CollectorCalibrationSnapshot: Codable {
     let ballPositionY: Double?
     let ballPositionZ: Double?
     let confidence: Double
+    let notes: String
+    let intrinsics: CameraIntrinsicsSample?
+
+    init(
+        status: String,
+        method: String,
+        source: String,
+        distanceMeters: Double?,
+        cameraHeightMeters: Double?,
+        cameraAngleDegrees: Double?,
+        pixelsPerMetre: Double?,
+        groundPlaneY: Float?,
+        clubLengthMeters: Double?,
+        lieAngleDegrees: Double?,
+        armLengthMeters: Double?,
+        swingPlaneNormalX: Float?,
+        swingPlaneNormalY: Float?,
+        swingPlaneNormalZ: Float?,
+        ballPositionX: Double?,
+        ballPositionY: Double?,
+        ballPositionZ: Double?,
+        confidence: Double,
+        notes: String,
+        intrinsics: CameraIntrinsicsSample? = nil
+    ) {
+        self.status = status
+        self.method = method
+        self.source = source
+        self.distanceMeters = distanceMeters
+        self.cameraHeightMeters = cameraHeightMeters
+        self.cameraAngleDegrees = cameraAngleDegrees
+        self.pixelsPerMetre = pixelsPerMetre
+        self.groundPlaneY = groundPlaneY
+        self.clubLengthMeters = clubLengthMeters
+        self.lieAngleDegrees = lieAngleDegrees
+        self.armLengthMeters = armLengthMeters
+        self.swingPlaneNormalX = swingPlaneNormalX
+        self.swingPlaneNormalY = swingPlaneNormalY
+        self.swingPlaneNormalZ = swingPlaneNormalZ
+        self.ballPositionX = ballPositionX
+        self.ballPositionY = ballPositionY
+        self.ballPositionZ = ballPositionZ
+        self.confidence = confidence
+        self.notes = notes
+        self.intrinsics = intrinsics
+    }
+}
+
+struct CollectorAudioSidecar: Codable {
+    let version: String
+    let generatedAt: String
+    let sampleRate: Double
+    let channelCount: Int
+    let durationSeconds: Double
+    let peakAmplitude: Double
+    let rmsDbfs: Double
+    let silenceRatio: Double
+    let impactBandPeakHz: Double?
+    let impactBandEnergyRatio: Double?
+    let frameCount: Int
     let notes: String
 }
 

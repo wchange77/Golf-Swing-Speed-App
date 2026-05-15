@@ -35,6 +35,10 @@ __pycache__/
 # Dataset artifacts
 projects/DatasetCollectionPlatform/datasets/raw/**
 projects/DatasetCollectionPlatform/datasets/processed/**
+projects/DatasetCollectionPlatform/datasets/external/**
+projects/DatasetCollectionPlatform/DatasetCollectorExport/**
+projects/DatasetCollectionPlatform/exports/tracknet_autolabel_priors/**
+projects/DatasetCollectionPlatform/AndroidLandingGpsCollector/local.properties
 !projects/DatasetCollectionPlatform/datasets/raw/.gitkeep
 !projects/DatasetCollectionPlatform/datasets/processed/.gitkeep
 
