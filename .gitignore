@@ -23,9 +23,12 @@ Pods/
 
 # OS
 .DS_Store
+._*
 *.swp
 *~
 __pycache__/
+.__pycache__/
+.pytest_cache/
 *.pyc
 .gradle/
 
@@ -36,6 +39,7 @@ __pycache__/
 projects/DatasetCollectionPlatform/datasets/raw/**
 projects/DatasetCollectionPlatform/datasets/processed/**
 projects/DatasetCollectionPlatform/datasets/external/**
+projects/DatasetCollectionPlatform/datasets/annotations/**
 projects/DatasetCollectionPlatform/DatasetCollectorExport/**
 projects/DatasetCollectionPlatform/exports/tracknet_autolabel_priors/**
 projects/DatasetCollectionPlatform/AndroidLandingGpsCollector/local.properties
