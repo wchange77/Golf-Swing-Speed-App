@@ -129,6 +129,98 @@ def collect_motion_candidates(
     return by_frame
 
 
+def _clubhead_seed_center(seed: SeedPoint) -> tuple[float, float] | None:
+    clubhead = getattr(seed, "clubhead_center", None)
+    if not isinstance(clubhead, dict) or not clubhead.get("visible"):
+        return None
+    return float(clubhead["x"]), float(clubhead["y"])
+
+
+def _clubhead_grid_points(center: tuple[float, float], *, radius_px: int = 18, grid_size: int = 5) -> np.ndarray:
+    cx, cy = center
+    offsets = np.linspace(-float(radius_px), float(radius_px), max(1, int(grid_size)), dtype=np.float32)
+    points = [[cx + dx, cy + dy] for dy in offsets for dx in offsets]
+    return np.array(points, dtype=np.float32).reshape(-1, 1, 2)
+
+
+def _clubhead_candidate_from_points(frame_index: int, points: np.ndarray) -> FlightCandidate:
+    flat = points.reshape(-1, 2)
+    xs = flat[:, 0]
+    ys = flat[:, 1]
+    x1 = int(np.floor(float(xs.min())))
+    y1 = int(np.floor(float(ys.min())))
+    x2 = int(np.ceil(float(xs.max())))
+    y2 = int(np.ceil(float(ys.max())))
+    return FlightCandidate(
+        frame_index=int(frame_index),
+        x=float(np.median(xs)),
+        y=float(np.median(ys)),
+        score=min(100.0, float(len(flat)) * 4.0),
+        area=max(1, (x2 - x1) * (y2 - y1)),
+        bbox=(x1, y1, max(1, x2 - x1), max(1, y2 - y1)),
+        source="clubhead_track",
+    )
+
+
+def track_clubhead_patch_centers(
+    *,
+    video_path: Path | str,
+    frame_indices: Sequence[int],
+    seed: SeedPoint,
+    radius_px: int = 18,
+    grid_size: int = 5,
+) -> dict[int, FlightCandidate]:
+    center = _clubhead_seed_center(seed)
+    if center is None or not frame_indices:
+        return {}
+    initial_points = _clubhead_grid_points(center, radius_px=radius_px, grid_size=grid_size)
+    min_valid_points = max(4, int(initial_points.shape[0] * 0.35))
+    points = initial_points
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return {}
+    by_frame: dict[int, FlightCandidate] = {}
+    previous_gray: np.ndarray | None = None
+    previous_index: int | None = None
+    try:
+        for frame_index in frame_indices:
+            frame_index = int(frame_index)
+            if previous_index is None or frame_index != previous_index + 1:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                previous_gray = None
+                points = initial_points
+            ok, frame = cap.read()
+            if not ok:
+                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if previous_gray is None:
+                by_frame[frame_index] = _clubhead_candidate_from_points(frame_index, points)
+                previous_gray = gray
+                previous_index = frame_index
+                continue
+            next_points, status, _ = cv2.calcOpticalFlowPyrLK(
+                previous_gray,
+                gray,
+                points,
+                None,
+                winSize=(25, 25),
+                maxLevel=3,
+                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
+            )
+            if next_points is None or status is None:
+                break
+            valid = next_points[status.reshape(-1) == 1].reshape(-1, 1, 2)
+            if valid.shape[0] < min_valid_points:
+                break
+            points = valid
+            by_frame[frame_index] = _clubhead_candidate_from_points(frame_index, points)
+            previous_gray = gray
+            previous_index = frame_index
+    finally:
+        cap.release()
+    return by_frame
+
+
 def find_launch_frame(
     candidates_by_frame: dict[int, list[FlightCandidate]],
     *,
@@ -160,6 +252,7 @@ def choose_validated_launch_frame(
     max_scan_frame: int,
     end_frame: int,
     min_visible_after_launch: int = 4,
+    clubhead_by_frame: dict[int, FlightCandidate] | None = None,
 ) -> tuple[int | None, dict[int, FlightCandidate]]:
     best: tuple[float, int, FlightCandidate] | None = None
     for frame_index in sorted(candidates_by_frame):
@@ -167,13 +260,18 @@ def choose_validated_launch_frame(
             continue
         if frame_index > max_scan_frame:
             break
-        for initial_candidate in _eligible_initial_candidates(candidates_by_frame.get(frame_index, []), seed=seed):
+        for initial_candidate in _eligible_initial_candidates(
+            candidates_by_frame.get(frame_index, []),
+            seed=seed,
+            clubhead_by_frame=clubhead_by_frame,
+        ):
             linked = link_flight_candidates(
                 candidates_by_frame,
                 seed=seed,
                 launch_frame=frame_index,
                 end_frame=min(end_frame, frame_index + 80),
                 initial_candidate=initial_candidate,
+                clubhead_by_frame=clubhead_by_frame,
             )
             visible_count = sum(1 for candidate in linked.values() if candidate.visible)
             if visible_count < min_visible_after_launch:
@@ -193,6 +291,7 @@ def choose_validated_launch_frame(
         launch_frame=launch_frame,
         end_frame=end_frame,
         initial_candidate=initial_candidate,
+        clubhead_by_frame=clubhead_by_frame,
     )
     return launch_frame, full_linked
 
@@ -295,9 +394,13 @@ def link_flight_candidates(
     end_frame: int,
     max_gap_frames: int = 6,
     initial_candidate: FlightCandidate | None = None,
+    clubhead_by_frame: dict[int, FlightCandidate] | None = None,
 ) -> dict[int, FlightCandidate]:
     linked: dict[int, FlightCandidate] = {}
-    first = initial_candidate or _choose_initial_candidate(candidates_by_frame.get(launch_frame, []), seed=seed)
+    first_candidates = candidates_by_frame.get(launch_frame, [])
+    if clubhead_by_frame is not None:
+        first_candidates = apply_clubhead_rejection(first_candidates, clubhead_by_frame)
+    first = initial_candidate or _choose_initial_candidate(first_candidates, seed=seed)
     if first is None:
         return linked
     linked[launch_frame] = first
@@ -309,8 +412,11 @@ def link_flight_candidates(
         predicted_x = last_visible.x + vx * (gap + 1)
         predicted_y = last_visible.y + vy * (gap + 1)
         speed = hypot(vx, vy)
+        frame_candidates = candidates_by_frame.get(frame_index, [])
+        if clubhead_by_frame is not None:
+            frame_candidates = apply_clubhead_rejection(frame_candidates, clubhead_by_frame)
         choice = _choose_next_candidate(
-            candidates_by_frame.get(frame_index, []),
+            frame_candidates,
             predicted_x=predicted_x,
             predicted_y=predicted_y,
             last_visible=last_visible,
@@ -354,6 +460,7 @@ def build_flight_trajectory(
     frame_stride: int = 1,
     camera_model_summary: dict[str, Any] | None = None,
     camera_model_path: str | None = None,
+    clubhead_by_frame: dict[int, FlightCandidate] | None = None,
 ) -> dict[str, Any]:
     width = int(shot.get("frameWidth") or 0)
     height = int(shot.get("frameHeight") or 0)
@@ -412,12 +519,14 @@ def build_flight_trajectory(
         "occlusionStartFrame": occlusion_start,
         "source": "seeded_motion_reacquisition",
         "occlusionEvidence": (
-            "forced_impact_window_with_clubhead_seed"
+            "clubhead_track"
+            if clubhead_by_frame
+            else "forced_impact_window_with_clubhead_seed"
             if clubhead_visible
             else "forced_impact_window_without_clubhead_track"
         ),
     }
-    return {
+    trajectory = {
         "version": "1.0",
         "sampleId": str(shot.get("sampleId") or seed.sample_id),
         "sessionId": str(shot.get("sessionId") or ""),
@@ -457,6 +566,19 @@ def build_flight_trajectory(
         },
         "frames": frames,
     }
+    if clubhead_by_frame:
+        trajectory["clubheadTrack"] = [
+            {
+                "frameIndex": int(candidate.frame_index),
+                "x": round(float(candidate.x), 3),
+                "y": round(float(candidate.y), 3),
+                "confidence": round(max(0.0, min(1.0, candidate.score / 100.0)), 6),
+                "bbox": list(candidate.bbox),
+                "source": candidate.source,
+            }
+            for _, candidate in sorted(clubhead_by_frame.items())
+        ]
+    return trajectory
 
 
 class SeededFlightTracker:
@@ -494,6 +616,11 @@ class SeededFlightTracker:
             frame_indices=frame_indices,
             seed=seed,
         )
+        clubhead_by_frame = track_clubhead_patch_centers(
+            video_path=Path(str(shot.get("sourceVideo") or "")),
+            frame_indices=frame_indices,
+            seed=seed,
+        )
         max_scan_frame = int(frame_indices[-1]) if frame_indices else seed.frame_index
         launch_frame, linked = (
             choose_validated_launch_frame(
@@ -502,6 +629,7 @@ class SeededFlightTracker:
                 min_scan_frame=seed.frame_index + 24,
                 max_scan_frame=max_scan_frame,
                 end_frame=int(frame_indices[-1]),
+                clubhead_by_frame=clubhead_by_frame,
             )
             if frame_indices
             else (None, {})
@@ -516,11 +644,13 @@ class SeededFlightTracker:
             frame_stride=self.frame_stride,
             camera_model_summary=camera_model_summary,
             camera_model_path=camera_model_path,
+            clubhead_by_frame=clubhead_by_frame,
         )
         trajectory["flightTracking"] = {
             "candidateFrames": len(candidates_by_frame),
             "launchFrame": launch_frame,
             "linkedVisibleFrames": sum(1 for candidate in linked.values() if candidate.visible),
             "linkedGapFrames": sum(1 for candidate in linked.values() if not candidate.visible),
+            "clubheadTrackFrames": len(clubhead_by_frame),
         }
         return trajectory

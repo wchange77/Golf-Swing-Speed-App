@@ -598,3 +598,39 @@ def test_render_many_enriches_trackman_ocr_from_report(tmp_path, monkeypatch):
     assert "ok" in html
     assert "CLUB SPEED" in html
     assert "needs human confirmation" in html
+
+
+def test_render_trajectory_viewer_crop_includes_clubhead_track(tmp_path, monkeypatch):
+    trajectory_path = tmp_path / "trajectory.json"
+    output_dir = tmp_path / "preview"
+    _write_json(trajectory_path, {
+        "sampleId": "sample_001",
+        "sourceVideo": "/data/video.mov",
+        "frameWidth": 1920,
+        "frameHeight": 1080,
+        "seed": {"frameIndex": 100, "x": 900.0, "y": 916.0},
+        "frames": [{"frameIndex": 100, "x": 900.0, "y": 916.0, "visible": True, "source": "manual_seed_static"}],
+        "clubheadTrack": [{"frameIndex": 100, "x": 500.0, "y": 300.0, "confidence": 1.0, "source": "clubhead_track"}],
+    })
+
+    class FakeCapture:
+        def isOpened(self):
+            return True
+
+        def set(self, prop, value):  # noqa: ANN001
+            return True
+
+        def read(self):
+            return True, np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(render_tracknet_m1_trajectory_viewer.cv2, "VideoCapture", lambda path: FakeCapture())
+    monkeypatch.setattr(render_tracknet_m1_trajectory_viewer.cv2, "imwrite", lambda path, image, params=None: True)
+
+    report = render_tracknet_m1_trajectory_viewer.render_trajectory_viewer(trajectory_path, output_dir)
+
+    x1, y1, x2, y2 = report["crop"]
+    assert x1 <= 500 <= x2
+    assert y1 <= 300 <= y2

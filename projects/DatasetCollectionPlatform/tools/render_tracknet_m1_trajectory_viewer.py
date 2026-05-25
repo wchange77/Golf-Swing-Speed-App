@@ -153,18 +153,27 @@ def render_trajectory_viewer(
     frame_height = int(trajectory.get("frameHeight") or 0)
     seed = trajectory.get("seed", {})
     visible_frames = [frame for frame in trajectory.get("frames", []) if frame.get("visible")]
+    clubhead_frames = [
+        frame
+        for frame in trajectory.get("clubheadTrack", [])
+        if isinstance(frame, dict) and frame.get("x") is not None and frame.get("y") is not None
+    ]
     xs = [float(seed.get("x", 0.0))] + [float(frame["x"]) for frame in visible_frames]
     ys = [float(seed.get("y", 0.0))] + [float(frame["y"]) for frame in visible_frames]
+    xs.extend(float(frame["x"]) for frame in clubhead_frames)
+    ys.extend(float(frame["y"]) for frame in clubhead_frames)
     x1 = max(0, min(int(min(xs) - 260), int(float(seed.get("x", 0.0)) - 360)))
     x2 = min(frame_width, max(int(max(xs) + 360), int(float(seed.get("x", 0.0)) + 360)))
     y1 = max(0, min(int(min(ys) - 180), 120))
     y2 = min(frame_height, max(int(max(ys) + 140), int(float(seed.get("y", 0.0)) + 100)))
 
     frame_by_index = {int(frame["frameIndex"]): frame for frame in trajectory.get("frames", [])}
+    clubhead_by_index = {int(frame["frameIndex"]): frame for frame in clubhead_frames}
     cap = cv2.VideoCapture(str(trajectory.get("sourceVideo") or ""))
     if not cap.isOpened():
         raise RuntimeError(f"could not open source video: {trajectory.get('sourceVideo')}")
     trail: list[tuple[int, int]] = []
+    clubhead_trail: list[tuple[int, int]] = []
     written: list[str] = []
     try:
         sorted_indices = sorted(frame_by_index)
@@ -189,6 +198,18 @@ def render_trajectory_viewer(
                 if len(trail) >= 2:
                     points = np.array([[(x - x1, y - y1) for x, y in trail]], dtype=np.int32)
                     cv2.polylines(crop, points, False, (255, 180, 0), 2, cv2.LINE_AA)
+                clubhead_payload = clubhead_by_index.get(frame_index)
+                if clubhead_payload is not None:
+                    clubhead_x = int(round(float(clubhead_payload["x"])))
+                    clubhead_y = int(round(float(clubhead_payload["y"])))
+                    clubhead_trail.append((clubhead_x, clubhead_y))
+                if len(clubhead_trail) >= 2:
+                    clubhead_points = np.array([[(x - x1, y - y1) for x, y in clubhead_trail]], dtype=np.int32)
+                    cv2.polylines(crop, clubhead_points, False, (255, 0, 255), 1, cv2.LINE_AA)
+                if clubhead_payload is not None:
+                    clubhead_x = int(round(float(clubhead_payload["x"]))) - x1
+                    clubhead_y = int(round(float(clubhead_payload["y"]))) - y1
+                    cv2.drawMarker(crop, (clubhead_x, clubhead_y), (255, 0, 255), cv2.MARKER_TILTED_CROSS, 18, 2)
                 seed_x = int(round(float(seed.get("x", 0.0)))) - x1
                 seed_y = int(round(float(seed.get("y", 0.0)))) - y1
                 cv2.drawMarker(crop, (seed_x, seed_y), (0, 255, 255), cv2.MARKER_CROSS, 24, 2)

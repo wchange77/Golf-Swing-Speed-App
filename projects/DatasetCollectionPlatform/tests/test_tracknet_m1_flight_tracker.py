@@ -165,6 +165,71 @@ def test_clubhead_like_candidate_is_penalized_near_clubhead_track():
     assert adjusted == []
 
 
+def test_validated_launch_uses_clubhead_track_to_reject_nearby_club_candidate():
+    seed = SeedPoint("sample_001", 100, 900.0, 916.0)
+    clubhead_by_frame = {
+        frame_index: FlightCandidate(frame_index, 900.0, 835.0, 100.0, 160, (880, 820, 40, 30), "clubhead_track")
+        for frame_index in range(130, 136)
+    }
+    candidates: dict[int, list[FlightCandidate]] = {
+        130: [
+            FlightCandidate(130, 900.0, 835.0, 90.0, 140, (882, 820, 36, 28), "club_motion"),
+            FlightCandidate(130, 940.0, 845.0, 70.0, 8, (936, 841, 8, 8), "ball_motion"),
+        ],
+    }
+    for frame_index, y in enumerate([820.0, 795.0, 770.0, 745.0, 720.0], start=131):
+        candidates[frame_index] = [
+            FlightCandidate(frame_index, 900.0, 835.0, 90.0, 140, (882, 820, 36, 28), "club_motion"),
+            FlightCandidate(frame_index, 940.0, y, 70.0, 8, (936, int(y) - 4, 8, 8), "ball_motion"),
+        ]
+
+    launch_frame, linked = choose_validated_launch_frame(
+        candidates,
+        seed=seed,
+        min_scan_frame=120,
+        max_scan_frame=140,
+        end_frame=140,
+        clubhead_by_frame=clubhead_by_frame,
+    )
+
+    assert launch_frame == 130
+    assert linked[130].source == "ball_motion"
+
+
+def test_build_flight_trajectory_records_clubhead_track_as_non_label_evidence():
+    seed = SeedPoint("sample_001", 100, 900.0, 916.0)
+    object.__setattr__(seed, "clubhead_center", {"x": 930.0, "y": 920.0, "visible": True})
+    shot = {
+        "sampleId": "sample_001",
+        "sessionId": "session_001",
+        "shotId": "shot_001",
+        "sourceVideo": "/data/video.mov",
+        "frameCount": 130,
+        "fps": 240,
+        "frameWidth": 1920,
+        "frameHeight": 1080,
+    }
+    linked = {105: FlightCandidate(105, 889.0, 846.0, 0.9, 16, (884, 842, 8, 8), "motion", visible=True)}
+    clubhead_by_frame = {
+        100: FlightCandidate(100, 930.0, 920.0, 100.0, 25, (912, 902, 36, 36), "clubhead_track"),
+        101: FlightCandidate(101, 925.0, 910.0, 95.0, 25, (907, 892, 36, 36), "clubhead_track"),
+    }
+
+    trajectory = build_flight_trajectory(
+        shot=shot,
+        seed=seed,
+        frame_indices=list(range(100, 107)),
+        launch_frame=105,
+        linked_candidates=linked,
+        checkpoint=Path("/home/data_0/models/tapnet/tapnextpp_checkpoint.pt"),
+        clubhead_by_frame=clubhead_by_frame,
+    )
+
+    assert trajectory["clubheadTrack"][0]["frameIndex"] == 100
+    assert trajectory["clubheadTrack"][0]["source"] == "clubhead_track"
+    assert trajectory["frames"][5]["labelEligible"] is True
+
+
 def test_seeded_tracker_scans_full_one_second_seed_window(monkeypatch):
     seed = SeedPoint("sample_late_launch", 240, 900.0, 916.0)
     shot = {
