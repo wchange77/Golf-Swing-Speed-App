@@ -504,3 +504,97 @@ def test_render_trajectory_viewer_escapes_sample_id_in_html_title(tmp_path, monk
     html = (output_dir / "trajectory_viewer.html").read_text(encoding="utf-8")
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_render_trajectory_viewer_shows_trackman_match_context(tmp_path, monkeypatch):
+    trajectory_path = tmp_path / "trajectory.json"
+    output_dir = tmp_path / "preview"
+    _write_json(trajectory_path, {
+        "sampleId": "sample_001",
+        "sourceVideo": "/data/video.mov",
+        "frameWidth": 320,
+        "frameHeight": 180,
+        "seed": {"frameIndex": 0, "x": 80.0, "y": 90.0},
+        "frames": [{"frameIndex": 0, "x": 80.0, "y": 90.0, "visible": True, "source": "manual_seed_static"}],
+        "trackman": {
+            "timeDeltaSeconds": 2.801,
+            "photo": {
+                "archiveName": "IMG_20260510_105337.jpg",
+                "ocr": {"status": "skipped", "reason": "disabled_by_flag"},
+            },
+        },
+    })
+
+    class FakeCapture:
+        def isOpened(self):
+            return True
+
+        def read(self):
+            return True, np.zeros((180, 320, 3), dtype=np.uint8)
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(render_tracknet_m1_trajectory_viewer.cv2, "VideoCapture", lambda path: FakeCapture())
+    monkeypatch.setattr(render_tracknet_m1_trajectory_viewer.cv2, "imwrite", lambda path, image, params=None: True)
+
+    render_tracknet_m1_trajectory_viewer.render_trajectory_viewer(trajectory_path, output_dir)
+
+    html = (output_dir / "trajectory_viewer.html").read_text(encoding="utf-8")
+    assert "TrackMan" in html
+    assert "IMG_20260510_105337.jpg" in html
+    assert "2.801s" in html
+    assert "disabled_by_flag" in html
+
+
+def test_render_many_enriches_trackman_ocr_from_report(tmp_path, monkeypatch):
+    trajectory_path = tmp_path / "trajectory.json"
+    output_root = tmp_path / "previews"
+    ocr_report_path = tmp_path / "ocr_report.json"
+    _write_json(trajectory_path, {
+        "sampleId": "sample_001",
+        "sourceVideo": "/data/video.mov",
+        "frameWidth": 320,
+        "frameHeight": 180,
+        "seed": {"frameIndex": 0, "x": 80.0, "y": 90.0},
+        "frames": [{"frameIndex": 0, "x": 80.0, "y": 90.0, "visible": True, "source": "manual_seed_static"}],
+        "trackman": {
+            "timeDeltaSeconds": 2.801,
+            "photo": {
+                "archiveName": "IMG_20260510_105337.jpg",
+                "ocr": {"status": "skipped", "reason": "disabled_by_flag"},
+            },
+        },
+    })
+    _write_json(ocr_report_path, {
+        "items": [{
+            "sampleId": "sample_001",
+            "trackmanPhoto": "IMG_20260510_105337.jpg",
+            "ocrStatus": "ok",
+            "ocrEngine": "rapidocr_onnxruntime",
+            "lineCount": 2,
+            "text": "CLUB SPEED\n72.9",
+            "needsHumanConfirmation": True,
+        }],
+    })
+
+    class FakeCapture:
+        def isOpened(self):
+            return True
+
+        def read(self):
+            return True, np.zeros((180, 320, 3), dtype=np.uint8)
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(render_tracknet_m1_trajectory_viewer.cv2, "VideoCapture", lambda path: FakeCapture())
+    monkeypatch.setattr(render_tracknet_m1_trajectory_viewer.cv2, "imwrite", lambda path, image, params=None: True)
+
+    render_tracknet_m1_trajectory_viewer.render_many([trajectory_path], output_root, trackman_ocr_report_path=ocr_report_path)
+
+    html = (output_root / "sample_001/trajectory_viewer.html").read_text(encoding="utf-8")
+    assert "rapidocr_onnxruntime" in html
+    assert "ok" in html
+    assert "CLUB SPEED" in html
+    assert "needs human confirmation" in html

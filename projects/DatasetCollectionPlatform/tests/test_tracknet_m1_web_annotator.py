@@ -234,6 +234,14 @@ def test_static_seed_ui_contains_dual_point_controls_and_payload():
     assert "points" in app_js
 
 
+def test_static_seed_ui_treats_missing_clubhead_as_next_open_seed():
+    app_js = (PLATFORM_ROOT.parents[2] / "tracknetv6-dataset-annotation/annotator/app.js").read_text(encoding="utf-8")
+
+    assert "seedHasClubhead" in app_js
+    assert "missingClubhead" in app_js
+    assert "缺杆头" in app_js
+
+
 def test_alignment_review_payload_and_save_reviewed_pair(tmp_path):
     tasks_path = tmp_path / "labelstudio/tracknet_m1_tasks.json"
     _write_json(tasks_path, [])
@@ -379,7 +387,13 @@ def test_http_app_returns_video_shots_and_saves_seed(tmp_path):
     status, headers, body = app.handle("GET", "/api/video-shots", b"")
     assert status == 200
     assert headers["Content-Type"] == "application/json; charset=utf-8"
-    assert json.loads(body.decode("utf-8"))["progress"] == {"total": 1, "seeded": 0, "missing": 1}
+    assert json.loads(body.decode("utf-8"))["progress"] == {
+        "total": 1,
+        "seeded": 0,
+        "missing": 1,
+        "clubheadSeeded": 0,
+        "missingClubhead": 1,
+    }
 
     status, headers, body = app.handle(
         "PUT",
@@ -391,7 +405,13 @@ def test_http_app_returns_video_shots_and_saves_seed(tmp_path):
     payload = json.loads(body.decode("utf-8"))
     assert payload["seed"]["sampleId"] == "sample_001"
     assert payload["seed"]["frameIndex"] == 12
-    assert payload["progress"] == {"total": 1, "seeded": 1, "missing": 0}
+    assert payload["progress"] == {
+        "total": 1,
+        "seeded": 1,
+        "missing": 0,
+        "clubheadSeeded": 0,
+        "missingClubhead": 1,
+    }
 
 
 def test_http_app_rejects_bad_annotation_request(tmp_path):

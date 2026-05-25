@@ -8,11 +8,11 @@ import pytest
 from tools.lib.tracknet_m1_seed_store import SeedValidationError, TrackNetM1SeedStore
 
 
-def _shot() -> dict:
+def _shot(sample_id: str = "sample_001") -> dict:
     return {
         "sessionId": "sess_001",
-        "shotId": "shot_001",
-        "sampleId": "sample_001",
+        "shotId": f"shot_{sample_id}",
+        "sampleId": sample_id,
         "sourceVideo": "/data/video.mov",
         "frameCount": 2400,
         "fps": 239.9,
@@ -45,7 +45,7 @@ def test_saving_same_sample_updates_seed_instead_of_duplicating(tmp_path: Path):
     payload = json.loads((tmp_path / "seeds.json").read_text(encoding="utf-8"))
     assert len(payload["seeds"]) == 1
     assert payload["seeds"][0]["frameIndex"] == 20
-    assert store.progress() == {"total": 1, "seeded": 1, "missing": 0}
+    assert store.progress() == {"total": 1, "seeded": 1, "missing": 0, "clubheadSeeded": 0, "missingClubhead": 1}
 
 
 def test_rejects_unknown_sample_outside_frame_and_outside_image(tmp_path: Path):
@@ -65,10 +65,31 @@ def test_api_payload_includes_shot_metadata_and_existing_seed(tmp_path: Path):
 
     payload = store.api_payload()
 
-    assert payload["progress"] == {"total": 1, "seeded": 1, "missing": 0}
+    assert payload["progress"] == {"total": 1, "seeded": 1, "missing": 0, "clubheadSeeded": 0, "missingClubhead": 1}
     assert payload["shots"][0]["sampleId"] == "sample_001"
     assert payload["shots"][0]["seed"]["x"] == 80.0
     assert payload["shots"][0]["frameCount"] == 2400
+
+
+def test_progress_tracks_dual_seed_completion_separately_from_ball_seed(tmp_path: Path):
+    store = TrackNetM1SeedStore(tmp_path / "seeds.json", [_shot("sample_001"), _shot("sample_002")])
+
+    store.save_seed("sample_001", {"frameIndex": 12, "x": 80, "y": 90}, reviewer="tester")
+    store.save_seed("sample_002", {
+        "seedFrame": 20,
+        "points": {
+            "ball_center": {"x": 80, "y": 90, "visible": True},
+            "clubhead_center": {"x": 110, "y": 92, "visible": True},
+        },
+    }, reviewer="tester")
+
+    assert store.progress() == {
+        "total": 2,
+        "seeded": 2,
+        "missing": 0,
+        "clubheadSeeded": 1,
+        "missingClubhead": 1,
+    }
 
 
 def test_loads_legacy_on_disk_seed_as_normalized_dual_seed(tmp_path: Path):

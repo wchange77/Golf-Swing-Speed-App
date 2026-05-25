@@ -142,7 +142,7 @@ def test_offline_reviewed_tracknet_m1_flow_keeps_only_accepted_pairs(
         },
     }, reviewer="tester")
 
-    assert seed_store.progress() == {"total": 1, "seeded": 1, "missing": 0}
+    assert seed_store.progress() == {"total": 1, "seeded": 1, "missing": 0, "clubheadSeeded": 1, "missingClubhead": 0}
     assert seed["points"]["ball_center"]["visible"] is True
     assert seed["points"]["clubhead_center"]["visible"] is True
     assert "sample_rejected" not in {saved["sampleId"] for saved in seed_store.export()["seeds"]}

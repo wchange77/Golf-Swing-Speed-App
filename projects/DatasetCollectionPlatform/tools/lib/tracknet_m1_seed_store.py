@@ -190,7 +190,22 @@ class TrackNetM1SeedStore:
     def progress(self) -> dict[str, int]:
         total = len(self._shots_by_sample)
         seeded = sum(1 for sample_id in self._shots_by_sample if sample_id in self._seeds_by_sample)
-        return {"total": total, "seeded": seeded, "missing": total - seeded}
+        clubhead_seeded = sum(
+            1
+            for sample_id in self._shots_by_sample
+            if (
+                (self._seeds_by_sample.get(sample_id, {}).get("points") or {})
+                .get("clubhead_center", {})
+                .get("visible")
+            )
+        )
+        return {
+            "total": total,
+            "seeded": seeded,
+            "missing": total - seeded,
+            "clubheadSeeded": clubhead_seeded,
+            "missingClubhead": total - clubhead_seeded,
+        }
 
     def api_payload(self) -> dict[str, Any]:
         shots = []
