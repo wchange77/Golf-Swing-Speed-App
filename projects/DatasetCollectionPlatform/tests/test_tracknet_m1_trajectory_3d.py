@@ -129,6 +129,24 @@ def test_video_only_3d_parameters_record_status_and_no_trackman_dependency():
     assert any(frame["source"] == "predicted_video_only_3d" for frame in trajectory["frames"])
 
 
+def test_video_only_3d_frames_are_generated_from_rk4_drag_magnus_not_analytic_ballistic():
+    result = build_video_only_3d_trajectory(_visible_artifact(), _camera())
+
+    trajectory = result["videoOnly3d"]
+    assert trajectory["model"]["frameGeneration"] == "rk4_simulate_trajectory"
+    assert trajectory["model"]["physics"]["ball"]["cd"] > 0
+    assert trajectory["model"]["physics"]["ball"]["cl"] > 0
+    predicted = next(
+        frame
+        for frame in reversed(trajectory["frames"])
+        if frame["source"] == "predicted_video_only_3d" and frame["frameIndex"] > _visible_artifact()["lastReliableFrame"]
+    )
+    t = (predicted["frameIndex"] - trajectory["launchFrame"]) / _visible_artifact()["fps"]
+    params = trajectory["parameters"]
+    analytic_z = params["z0Meters"] + params["vzMps"] * t
+    assert predicted["worldMeters"]["z"] != pytest.approx(analytic_z, abs=0.001)
+
+
 def test_video_only_3d_trajectory_requires_three_visible_points():
     artifact = _visible_artifact()
     artifact["ballSmoothVisibleFrames"] = artifact["ballSmoothVisibleFrames"][:2]
@@ -273,25 +291,53 @@ def test_trackman_constrained_trajectory_uses_confirmed_metrics():
     dx = landing["x"] - trajectory["parameters"]["x0Meters"]
     dz = landing["z"] - trajectory["parameters"]["z0Meters"]
     horizontal_carry_m = (dx**2 + dz**2) ** 0.5
-    assert horizontal_carry_m == pytest.approx(((150.0**2 + 12.0**2) ** 0.5) * 0.9144, abs=0.2)
-    assert trajectory["parameters"]["forwardCarryMeters"] == pytest.approx(150.0 * 0.9144, abs=0.01)
-    assert trajectory["parameters"]["sideCarryMeters"] == pytest.approx(12.0 * 0.9144, abs=0.01)
-    assert trajectory["parameters"]["apexMeters"] == pytest.approx(30.0 * 0.9144, abs=0.01)
+    assert horizontal_carry_m > 0
     qc = trajectory["qc"]["trackmanComparison"]
-    assert qc["predictedCarryYd"] == pytest.approx(150.0, abs=0.01)
+    assert trajectory["parameters"]["forwardCarryMeters"] == pytest.approx(qc["predictedCarryYd"] * 0.9144, abs=0.01)
+    assert trajectory["parameters"]["sideCarryMeters"] == pytest.approx(qc["predictedSideYd"] * 0.9144, abs=0.01)
+    assert trajectory["parameters"]["apexMeters"] == pytest.approx(qc["predictedApexYd"] * 0.9144, abs=0.01)
     assert qc["confirmedCarryYd"] == 150.0
-    assert qc["carryResidualYd"] == pytest.approx(0.0, abs=0.01)
     assert qc["carryMismatchThresholdYd"] == pytest.approx(22.5)
-    assert qc["predictedSideYd"] == pytest.approx(12.0, abs=0.01)
+    assert abs(qc["carryResidualYd"]) <= qc["carryMismatchThresholdYd"]
     assert qc["confirmedSideYd"] == 12.0
-    assert qc["sideResidualYd"] == pytest.approx(0.0, abs=0.01)
+    assert abs(qc["sideResidualYd"]) <= qc["sideMismatchThresholdYd"]
     assert qc["confirmedApexYd"] == 30.0
-    assert qc["apexResidualYd"] == pytest.approx(0.0, abs=0.01)
     assert qc["apexMismatchThresholdYd"] == pytest.approx(6.0)
+    assert abs(qc["apexResidualYd"]) <= qc["apexMismatchThresholdYd"]
     assert qc["issues"] == []
     assert 0 <= trajectory["landingPointImage"]["x"] < 1920
     assert 0 <= trajectory["landingPointImage"]["y"] < 1080
     assert all(frame["labelEligible"] is False for frame in trajectory["frames"])
+
+
+def test_trackman_constrained_frames_are_generated_from_rk4_and_calibrated_to_trackman():
+    reviewed = {
+        "metricsUsable": True,
+        "correctedFields": {
+            "ballSpeed": {"normalizedValue": 100.0, "normalizedUnit": "mph"},
+            "launchAngle": {"normalizedValue": 16.0, "normalizedUnit": "deg"},
+            "carry": {"normalizedValue": 150.0, "normalizedUnit": "yd"},
+            "apex": {"normalizedValue": 30.0, "normalizedUnit": "yd"},
+            "carrySide": {"normalizedValue": 12.0, "normalizedUnit": "yd", "direction": "right"},
+            "curve": {"normalizedValue": 4.0, "normalizedUnit": "yd", "direction": "right"},
+            "spinRate": {"normalizedValue": 3500.0, "normalizedUnit": "rpm"},
+        },
+    }
+
+    result = build_trackman_constrained_3d_trajectory(_visible_artifact(), _camera(), reviewed)
+
+    trajectory = result["trackmanConstrained3d"]
+    assert trajectory["model"]["frameGeneration"] == "rk4_simulate_trajectory"
+    assert trajectory["model"]["physics"]["coefficientPolicy"] == "constant_coefficients_baseline"
+    assert trajectory["model"]["trackmanFit"]["fitMethod"] == "rk4_drag_magnus_search"
+    assert trajectory["trackmanInputs"]["spinRateRpm"] == 3500.0
+    assert trajectory["parameters"]["spinRpm"]["backspin"] > 0
+    assert trajectory["parameters"]["spinRpm"]["sidespin"] > 0
+    assert any(frame["source"] == "predicted_trackman_constrained_3d_physics" for frame in trajectory["frames"])
+    qc = trajectory["qc"]["trackmanComparison"]
+    assert abs(qc["carryResidualYd"]) <= qc["carryMismatchThresholdYd"]
+    assert abs(qc["apexResidualYd"]) <= qc["apexMismatchThresholdYd"]
+    assert abs(qc["sideResidualYd"]) <= qc["sideMismatchThresholdYd"]
 
 
 def test_trackman_constrained_trajectory_uses_curve_separately_from_side_endpoint():
@@ -316,7 +362,7 @@ def test_trackman_constrained_trajectory_uses_curve_separately_from_side_endpoin
     assert inputs["curveYd"] == 3.0
     assert inputs["curveSourceField"] == "curve"
     assert inputs["launchLineSideYd"] == -11.0
-    assert params["sideCarryMeters"] == pytest.approx(-8.0 * 0.9144, abs=0.01)
+    assert params["sideCarryMeters"] == pytest.approx(-8.0 * 0.9144, abs=0.05)
     assert params["curveMeters"] == pytest.approx(3.0 * 0.9144, abs=0.01)
     assert params["launchLineSideMeters"] == pytest.approx(-11.0 * 0.9144, abs=0.01)
 

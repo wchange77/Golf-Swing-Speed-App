@@ -12,6 +12,9 @@ from lib.tracknet_m1_physics_core import BallProperties, LaunchState, simulate_t
 GRAVITY_MPS2 = 9.80665
 MPH_TO_MPS = 0.44704
 YD_TO_M = 0.9144
+BASELINE_BALL = BallProperties(cd=0.25, cl=0.16)
+VIDEO_ONLY_BACKSPIN_PRIOR_RPM = 2800.0
+TRACKMAN_FIT_DT_SECONDS = 1.0 / 240.0
 TRACKMAN_FIELD_ORDER = [
     "clubSpeed",
     "launchAngle",
@@ -516,6 +519,81 @@ def _parameter_status(
     return payload
 
 
+def _physics_model_summary(physics: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "version": physics.get("version"),
+        "modelFamily": physics.get("modelFamily"),
+        "coefficientPolicy": physics.get("coefficientPolicy"),
+        "coefficientProvenance": physics.get("coefficientProvenance"),
+        "assumptions": physics.get("assumptions"),
+        "ball": physics.get("ball"),
+        "environment": physics.get("environment"),
+        "flightTimeSeconds": physics.get("flightTimeSeconds"),
+        "carryMeters": physics.get("carryMeters"),
+        "sideMeters": physics.get("sideMeters"),
+        "apexMeters": physics.get("apexMeters"),
+        "landing": physics.get("landing"),
+    }
+
+
+def _physics_frame_index(launch_frame: int, frame: dict[str, Any], fps: float) -> int:
+    return int(round(launch_frame + float(frame.get("timeSeconds", 0.0)) * fps))
+
+
+def _project_physics_frames(
+    *,
+    physics: dict[str, Any],
+    launch_frame: int,
+    fps: float,
+    intrinsics: dict[str, float],
+    camera_height_m: float,
+    pitch_rad: float,
+    frame_width: float,
+    frame_height: float,
+    visible_constraints: dict[int, dict[str, float]],
+    predicted_source: str,
+    observed_source: str,
+    transform,
+) -> list[dict[str, Any]]:
+    frames_by_index: dict[int, dict[str, Any]] = {}
+    for physics_frame in physics.get("frames", []):
+        if not isinstance(physics_frame, dict):
+            continue
+        world = physics_frame.get("worldMeters") if isinstance(physics_frame.get("worldMeters"), dict) else {}
+        try:
+            local_x = float(world["x"])
+            height = float(world["height"])
+            local_z = float(world["z"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        frame_index = _physics_frame_index(launch_frame, physics_frame, fps)
+        x, z = transform(local_x, local_z)
+        u, v = _project(x, height, z, intrinsics, camera_height_m, pitch_rad)
+        source = predicted_source
+        constraint = visible_constraints.get(frame_index)
+        if constraint is not None:
+            u = constraint["x"]
+            v = constraint["y"]
+            source = observed_source
+        frames_by_index[frame_index] = {
+            "frameIndex": frame_index,
+            "x": round(u, 3),
+            "y": round(v, 3),
+            "visible": 0 <= u < frame_width and 0 <= v < frame_height,
+            "source": source,
+            "labelEligible": False,
+            "status": "needs_review",
+            "worldMeters": {"x": round(x, 4), "height": round(height, 4), "z": round(z, 4)},
+        }
+    return [frames_by_index[index] for index in sorted(frames_by_index)]
+
+
+def _safe_trackman_spin(trackman_spin_rpm: float | None) -> float:
+    if trackman_spin_rpm is None or not math.isfinite(trackman_spin_rpm) or trackman_spin_rpm <= 0:
+        return VIDEO_ONLY_BACKSPIN_PRIOR_RPM
+    return trackman_spin_rpm
+
+
 def _used_and_missing_trackman_fields(trackman_reviewed: dict[str, Any]) -> tuple[list[str], list[str]]:
     corrected_fields = trackman_reviewed.get("correctedFields") if isinstance(trackman_reviewed.get("correctedFields"), dict) else {}
     used: list[str] = []
@@ -531,6 +609,230 @@ def _used_and_missing_trackman_fields(trackman_reviewed: dict[str, Any]) -> tupl
         else:
             missing.append(field)
     return used, missing
+
+
+def _simulate_local_trackman(
+    *,
+    forward_speed_mps: float,
+    vertical_speed_mps: float,
+    side_velocity_mps: float,
+    backspin_rpm: float,
+    sidespin_rpm: float,
+    dt: float = TRACKMAN_FIT_DT_SECONDS,
+    max_time: float = 12.0,
+) -> dict[str, Any]:
+    return simulate_trajectory(
+        LaunchState(
+            position=(0.0, 0.0, 0.0),
+            velocity=(side_velocity_mps, vertical_speed_mps, forward_speed_mps),
+            spin_rpm=(0.0, backspin_rpm, sidespin_rpm),
+        ),
+        ball=BASELINE_BALL,
+        dt=dt,
+        max_time=max_time,
+    )
+
+
+def _trackman_fit_error(
+    physics: dict[str, Any],
+    *,
+    target_carry_m: float | None,
+    target_apex_m: float | None,
+    target_side_m: float | None = None,
+) -> float:
+    error = 0.0
+    if target_carry_m is not None:
+        scale = max(10.0, abs(target_carry_m))
+        error += ((float(physics["carryMeters"]) - target_carry_m) / scale) ** 2
+    if target_apex_m is not None:
+        scale = max(3.0, abs(target_apex_m))
+        error += 1.4 * ((float(physics["apexMeters"]) - target_apex_m) / scale) ** 2
+    if target_side_m is not None:
+        scale = max(2.0, abs(target_side_m))
+        error += 0.8 * ((float(physics["sideMeters"]) - target_side_m) / scale) ** 2
+    return error
+
+
+def _fit_side_velocity(
+    *,
+    forward_speed_mps: float,
+    vertical_speed_mps: float,
+    initial_side_velocity_mps: float,
+    backspin_rpm: float,
+    sidespin_rpm: float,
+    target_side_m: float,
+) -> tuple[float, dict[str, Any]]:
+    side_velocity = initial_side_velocity_mps
+    physics = _simulate_local_trackman(
+        forward_speed_mps=forward_speed_mps,
+        vertical_speed_mps=vertical_speed_mps,
+        side_velocity_mps=side_velocity,
+        backspin_rpm=backspin_rpm,
+        sidespin_rpm=sidespin_rpm,
+    )
+    for _ in range(5):
+        flight_time = max(0.25, float(physics["flightTimeSeconds"]))
+        side_velocity += (target_side_m - float(physics["sideMeters"])) / flight_time
+        physics = _simulate_local_trackman(
+            forward_speed_mps=forward_speed_mps,
+            vertical_speed_mps=vertical_speed_mps,
+            side_velocity_mps=side_velocity,
+            backspin_rpm=backspin_rpm,
+            sidespin_rpm=sidespin_rpm,
+        )
+    return side_velocity, physics
+
+
+def _calibrated_trackman_physics(
+    *,
+    speed_mps: float,
+    launch_angle_deg: float,
+    carry_yd: float | None,
+    apex_yd: float | None,
+    side_yd: float | None,
+    curve_yd: float | None,
+    spin_rate_rpm: float | None,
+) -> dict[str, Any]:
+    target_carry_m = carry_yd * YD_TO_M if carry_yd is not None else None
+    target_apex_m = apex_yd * YD_TO_M if apex_yd is not None else None
+    target_side_m = (side_yd or 0.0) * YD_TO_M
+    curve_m = (curve_yd or 0.0) * YD_TO_M
+    launch_line_side_m = target_side_m - curve_m
+    base_backspin = _safe_trackman_spin(spin_rate_rpm)
+    best: dict[str, Any] | None = None
+
+    speed_scales = [0.75, 0.9, 1.05, 1.2, 1.35, 1.55, 1.75]
+    angle_offsets = [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0, 16.0, 20.0]
+    spin_scales = [0.0, 0.5, 1.0, 1.5, 2.0]
+    if target_carry_m is None and target_apex_m is None:
+        speed_scales = [1.0]
+        angle_offsets = [0.0]
+        spin_scales = [1.0]
+
+    for speed_scale in speed_scales:
+        for angle_offset in angle_offsets:
+            angle = max(2.0, min(55.0, launch_angle_deg + angle_offset))
+            speed = max(1.0, speed_mps * speed_scale)
+            forward_speed = speed * math.cos(math.radians(angle))
+            vertical_speed = speed * math.sin(math.radians(angle))
+            if forward_speed <= 0 or vertical_speed <= 0:
+                continue
+            for spin_scale in spin_scales:
+                backspin = max(0.0, base_backspin * spin_scale)
+                physics = _simulate_local_trackman(
+                    forward_speed_mps=forward_speed,
+                    vertical_speed_mps=vertical_speed,
+                    side_velocity_mps=0.0,
+                    backspin_rpm=backspin,
+                    sidespin_rpm=0.0,
+                    dt=1.0 / 120.0,
+                )
+                error = _trackman_fit_error(
+                    physics,
+                    target_carry_m=target_carry_m,
+                    target_apex_m=target_apex_m,
+                )
+                error += 0.02 * (speed_scale - 1.0) ** 2
+                error += 0.0005 * (angle - launch_angle_deg) ** 2
+                if spin_rate_rpm is not None:
+                    error += 0.02 * (spin_scale - 1.0) ** 2
+                if best is None or error < best["error"]:
+                    best = {
+                        "error": error,
+                        "speedMps": speed,
+                        "launchAngleDeg": angle,
+                        "forwardSpeedMps": forward_speed,
+                        "verticalSpeedMps": vertical_speed,
+                        "backspinRpm": backspin,
+                        "coarsePhysics": physics,
+                    }
+
+    if best is None:
+        raise ValueError("TrackMan RK4 fit could not find a valid launch state")
+
+    step_speed = max(0.5, 0.12 * float(best["speedMps"]))
+    step_angle = 4.0
+    step_spin = max(150.0, 0.25 * base_backspin)
+    for _ in range(6):
+        improved = False
+        for key, step in (("speedMps", step_speed), ("launchAngleDeg", step_angle), ("backspinRpm", step_spin)):
+            for direction in (-1.0, 1.0):
+                trial = dict(best)
+                trial[key] = float(trial[key]) + direction * step
+                trial["launchAngleDeg"] = max(2.0, min(55.0, float(trial["launchAngleDeg"])))
+                trial["speedMps"] = max(1.0, float(trial["speedMps"]))
+                trial["backspinRpm"] = max(0.0, float(trial["backspinRpm"]))
+                forward_speed = float(trial["speedMps"]) * math.cos(math.radians(float(trial["launchAngleDeg"])))
+                vertical_speed = float(trial["speedMps"]) * math.sin(math.radians(float(trial["launchAngleDeg"])))
+                physics = _simulate_local_trackman(
+                    forward_speed_mps=forward_speed,
+                    vertical_speed_mps=vertical_speed,
+                    side_velocity_mps=0.0,
+                    backspin_rpm=float(trial["backspinRpm"]),
+                    sidespin_rpm=0.0,
+                    dt=1.0 / 120.0,
+                )
+                error = _trackman_fit_error(
+                    physics,
+                    target_carry_m=target_carry_m,
+                    target_apex_m=target_apex_m,
+                )
+                if error < best["error"]:
+                    best.update(trial)
+                    best["forwardSpeedMps"] = forward_speed
+                    best["verticalSpeedMps"] = vertical_speed
+                    best["coarsePhysics"] = physics
+                    best["error"] = error
+                    improved = True
+        if not improved:
+            step_speed *= 0.5
+            step_angle *= 0.5
+            step_spin *= 0.5
+
+    sidespin = 0.0
+    if abs(curve_m) > 1e-9:
+        sidespin = math.copysign(min(3000.0, max(250.0, abs(curve_yd or 0.0) * 220.0)), curve_m)
+    flight_time = max(0.25, float(best["coarsePhysics"]["flightTimeSeconds"]))
+    initial_side_velocity = launch_line_side_m / flight_time
+    side_velocity, physics = _fit_side_velocity(
+        forward_speed_mps=float(best["forwardSpeedMps"]),
+        vertical_speed_mps=float(best["verticalSpeedMps"]),
+        initial_side_velocity_mps=initial_side_velocity,
+        backspin_rpm=float(best["backspinRpm"]),
+        sidespin_rpm=sidespin,
+        target_side_m=target_side_m,
+    )
+    fit_error = _trackman_fit_error(
+        physics,
+        target_carry_m=target_carry_m,
+        target_apex_m=target_apex_m,
+        target_side_m=target_side_m if side_yd is not None else None,
+    )
+    return {
+        "physics": physics,
+        "fit": {
+            "fitMethod": "rk4_drag_magnus_search",
+            "targetCarryMeters": target_carry_m,
+            "targetApexMeters": target_apex_m,
+            "targetSideMeters": target_side_m if side_yd is not None else None,
+            "targetCurveMeters": curve_m if curve_yd is not None else None,
+            "objective": round(float(fit_error), 8),
+            "inputBallSpeedMps": speed_mps,
+            "calibratedBallSpeedMps": round(float(best["speedMps"]), 6),
+            "inputLaunchAngleDeg": launch_angle_deg,
+            "calibratedLaunchAngleDeg": round(float(best["launchAngleDeg"]), 6),
+        },
+        "velocity": {
+            "sideVelocityMps": side_velocity,
+            "verticalVelocityMps": float(best["verticalSpeedMps"]),
+            "forwardVelocityMps": float(best["forwardSpeedMps"]),
+        },
+        "spinRpm": {
+            "backspin": float(best["backspinRpm"]),
+            "sidespin": sidespin,
+        },
+        "launchLineSideMeters": launch_line_side_m,
+    }
 
 
 def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dict[str, Any]) -> dict[str, Any]:
@@ -549,13 +851,6 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
         raise ValueError("3D trajectory fit requires positive vertical velocity")
     fps = float(visible_artifact["fps"])
     launch_frame = int(visible_artifact["launchFrame"])
-    landing_time = 2.0 * vy / GRAVITY_MPS2
-    if not math.isfinite(landing_time) or landing_time <= 0:
-        raise ValueError("3D trajectory fit produced invalid landing time")
-    landing_z = z0 + vz * landing_time
-    if not math.isfinite(landing_z) or landing_z <= 0:
-        raise ValueError("3D trajectory fit produced invalid landing z")
-    landing_frame = int(round(launch_frame + landing_time * fps))
     frame_width = float(visible_artifact["frameWidth"])
     frame_height = float(visible_artifact["frameHeight"])
     visible_constraints = _visible_ball_constraints(visible_artifact, launch_frame=launch_frame)
@@ -564,40 +859,32 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
     ball_speed = math.sqrt(vx * vx + vy * vy + vz * vz)
     launch_angle = math.degrees(math.atan2(vy, horizontal_speed)) if horizontal_speed > 0 else 0.0
     launch_direction = math.degrees(math.atan2(vx, vz)) if abs(vz) > 1e-9 or abs(vx) > 1e-9 else 0.0
+    spin_prior_rpm = VIDEO_ONLY_BACKSPIN_PRIOR_RPM
     physics_baseline = simulate_trajectory(
-        LaunchState(position=(x0, 0.0, z0), velocity=(vx, vy, vz), spin_rpm=(0.0, 0.0, 0.0)),
-        ball=BallProperties(cd=0.0, cl=0.0),
-        dt=max(1.0 / fps, 0.002),
-        max_time=max(landing_time + 0.2, 1.0),
+        LaunchState(position=(x0, 0.0, z0), velocity=(vx, vy, vz), spin_rpm=(0.0, spin_prior_rpm, 0.0)),
+        ball=BASELINE_BALL,
+        dt=TRACKMAN_FIT_DT_SECONDS,
+        max_time=12.0,
     )
-
-    frames = []
-    for frame_index in range(launch_frame, landing_frame + 1):
-        t = (frame_index - launch_frame) / fps
-        height = max(0.0, vy * t - 0.5 * GRAVITY_MPS2 * t * t)
-        x = x0 + vx * t
-        z = z0 + vz * t
-        if not math.isfinite(z) or z <= 0:
-            raise ValueError("3D trajectory fit produced invalid z progression")
-        u, v = _project(x, height, z, intrinsics, camera_height_m, pitch_rad)
-        source = "predicted_video_only_3d"
-        constraint = visible_constraints.get(frame_index)
-        if constraint is not None:
-            u = constraint["x"]
-            v = constraint["y"]
-            source = "observed_3d"
-        frames.append(
-            {
-                "frameIndex": frame_index,
-                "x": round(u, 3),
-                "y": round(v, 3),
-                "visible": 0 <= u < frame_width and 0 <= v < frame_height,
-                "source": source,
-                "labelEligible": False,
-                "status": "needs_review",
-                "worldMeters": {"x": round(x, 4), "height": round(height, 4), "z": round(z, 4)},
-            }
-        )
+    if physics_baseline["landing"]["zMeters"] <= z0:
+        raise ValueError("3D trajectory physics produced invalid landing z")
+    frames = _project_physics_frames(
+        physics=physics_baseline,
+        launch_frame=launch_frame,
+        fps=fps,
+        intrinsics=intrinsics,
+        camera_height_m=camera_height_m,
+        pitch_rad=pitch_rad,
+        frame_width=frame_width,
+        frame_height=frame_height,
+        visible_constraints=visible_constraints,
+        predicted_source="predicted_video_only_3d",
+        observed_source="observed_3d",
+        transform=lambda x, z: (x, z),
+    )
+    if not frames:
+        raise ValueError("3D trajectory physics produced no frames")
+    landing_frame = frames[-1]["frameIndex"]
 
     landing = frames[-1]
     trajectory = {
@@ -612,7 +899,9 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
         "model": {
             "type": "video_only_rk4_drag_magnus_3d",
             "modelFamily": "RK4_drag_magnus",
+            "frameGeneration": "rk4_simulate_trajectory",
             "coefficientPolicy": physics_baseline["coefficientPolicy"],
+            "physics": _physics_model_summary(physics_baseline),
             "gravityMetersPerSecond2": GRAVITY_MPS2,
             "calibrationUsed": {
                 "cameraHeightMeters": camera_height_m,
@@ -656,12 +945,19 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
                 evidence_frames=evidence_frames,
             ),
             "spin": _parameter_status(
-                value=None,
-                status="unidentifiable",
-                confidence=0.0,
+                value={"backspinRpm": spin_prior_rpm, "sidespinRpm": 0.0},
+                status="priorAssisted",
+                confidence=0.2,
                 evidence_frames=evidence_frames,
-                failure_reason="visible segment does not uniquely identify backspin or sidespin without stronger curve evidence",
+                failure_reason="visible segment does not uniquely identify spin; baseline backspin prior used for RK4 Magnus review curve",
             ),
+        },
+        "usedPriors": {
+            "backspinRpm": {
+                "value": spin_prior_rpm,
+                "source": "video_only_baseline_prior_until_calibrated",
+                "confidence": 0.2,
+            }
         },
         "frames": frames,
     }
@@ -789,19 +1085,10 @@ def build_trackman_constrained_3d_trajectory(
     pitch_rad = math.radians(pitch_degrees)
 
     speed_mps = speed_mph * MPH_TO_MPS
-    launch_angle_rad = math.radians(launch_angle_deg)
-    horizontal_speed = speed_mps * math.cos(launch_angle_rad)
-    vertical_speed = speed_mps * math.sin(launch_angle_rad)
-    if not math.isfinite(horizontal_speed) or horizontal_speed <= 0:
+    if not math.isfinite(speed_mps) or speed_mps <= 0:
         return _unavailable_trackman(
             "unavailable_invalid_trackman_fields",
-            "TrackMan ballSpeed and launchAngle must produce positive horizontal speed",
-            visible_artifact,
-        )
-    if not math.isfinite(vertical_speed) or vertical_speed <= 0:
-        return _unavailable_trackman(
-            "unavailable_invalid_trackman_fields",
-            "TrackMan launchAngle must produce positive vertical speed",
+            "TrackMan ballSpeed must produce positive launch speed",
             visible_artifact,
         )
 
@@ -809,79 +1096,77 @@ def build_trackman_constrained_3d_trajectory(
     unit_z = direction_z / direction_norm
     x0 = _finite_float("videoOnly3d parameters x0Meters", params["x0Meters"])
     z0 = _finite_float("videoOnly3d parameters z0Meters", params["z0Meters"], positive=True)
-
-    if apex_yd is not None:
-        apex_m = apex_yd * YD_TO_M
-        vy = math.sqrt(2.0 * GRAVITY_MPS2 * apex_m)
-    else:
-        vy = vertical_speed
-        apex_m = (vy * vy) / (2.0 * GRAVITY_MPS2)
-    landing_time = 2.0 * vy / GRAVITY_MPS2
-    vertical_acceleration = -GRAVITY_MPS2
-    if not math.isfinite(landing_time) or landing_time <= 0:
-        return _unavailable_trackman(
-            "unavailable_invalid_trackman_fields",
-            "TrackMan metrics produced invalid landing time",
-            visible_artifact,
-        )
-
-    forward_carry_m = carry_yd * YD_TO_M if carry_yd is not None else horizontal_speed * landing_time
-    side_carry_m = (side_yd or 0.0) * YD_TO_M
-    curve_m = (curve_yd or 0.0) * YD_TO_M
-    launch_line_side_m = side_carry_m - curve_m
-    horizontal_distance_m = math.hypot(forward_carry_m, side_carry_m)
-    horizontal_speed_model = horizontal_distance_m / landing_time
     right_x = unit_z
     right_z = -unit_x
-    vx = forward_carry_m / landing_time * unit_x + side_carry_m / landing_time * right_x
-    vz = forward_carry_m / landing_time * unit_z + side_carry_m / landing_time * right_z
+    curve_m = (curve_yd or 0.0) * YD_TO_M
+    try:
+        calibrated = _calibrated_trackman_physics(
+            speed_mps=speed_mps,
+            launch_angle_deg=launch_angle_deg,
+            carry_yd=carry_yd,
+            apex_yd=apex_yd,
+            side_yd=side_yd,
+            curve_yd=curve_yd,
+            spin_rate_rpm=optional_trackman_inputs.get("spinRateRpm"),
+        )
+    except ValueError as exc:
+        return _unavailable_trackman(
+            "unavailable_trackman_reconstruction_error",
+            str(exc),
+            visible_artifact,
+        )
+    physics_baseline = calibrated["physics"]
+    local_velocity = calibrated["velocity"]
+    spin_rpm = calibrated["spinRpm"]
+    side_velocity = float(local_velocity["sideVelocityMps"])
+    forward_velocity = float(local_velocity["forwardVelocityMps"])
+    vy = float(local_velocity["verticalVelocityMps"])
+    vx = forward_velocity * unit_x + side_velocity * right_x
+    vz = forward_velocity * unit_z + side_velocity * right_z
+    landing_time = float(physics_baseline["flightTimeSeconds"])
+    forward_carry_m = float(physics_baseline["carryMeters"])
+    side_carry_m = float(physics_baseline["sideMeters"])
+    apex_m = float(physics_baseline["apexMeters"])
+    launch_line_side_m = float(calibrated["launchLineSideMeters"])
+    horizontal_speed_model = math.hypot(forward_velocity, side_velocity)
 
     fps = float(visible_artifact["fps"])
     launch_frame = int(visible_artifact["launchFrame"])
-    landing_frame = int(math.ceil(launch_frame + landing_time * fps))
     frame_width = float(visible_artifact["frameWidth"])
     frame_height = float(visible_artifact["frameHeight"])
-
-    frames = []
     visible_constraints = _visible_ball_constraints(visible_artifact, launch_frame=launch_frame)
-    visible_overlap_residuals: list[float] = []
-
-    for frame_index in range(launch_frame, landing_frame + 1):
-        t = min((frame_index - launch_frame) / fps, landing_time)
-        progress = 1.0 if landing_time <= 0 else min(max(t / landing_time, 0.0), 1.0)
-        height = max(0.0, 4.0 * apex_m * progress * (1.0 - progress))
-        forward_distance = forward_carry_m * progress
-        side_distance = launch_line_side_m * progress + curve_m * progress * progress
-        x = x0 + unit_x * forward_distance + right_x * side_distance
-        z = z0 + unit_z * forward_distance + right_z * side_distance
-        if not math.isfinite(z) or z <= 0:
-            raise ValueError("TrackMan-constrained trajectory produced invalid z progression")
-        u, v = _project(x, height, z, intrinsics, camera_height_m, pitch_rad)
-        source = "predicted_trackman_constrained_3d"
-        constraint = visible_constraints.get(frame_index)
-        if constraint is not None:
-            visible_overlap_residuals.append(0.0)
-            u = constraint["x"]
-            v = constraint["y"]
-            source = "visible_ball_hard_constraint"
-        frames.append(
-            {
-                "frameIndex": frame_index,
-                "x": round(u, 3),
-                "y": round(v, 3),
-                "visible": 0 <= u < frame_width and 0 <= v < frame_height,
-                "source": source,
-                "labelEligible": False,
-                "status": "needs_review",
-                "worldMeters": {"x": round(x, 4), "height": round(height, 4), "z": round(z, 4)},
-            }
+    frames = _project_physics_frames(
+        physics=physics_baseline,
+        launch_frame=launch_frame,
+        fps=fps,
+        intrinsics=intrinsics,
+        camera_height_m=camera_height_m,
+        pitch_rad=pitch_rad,
+        frame_width=frame_width,
+        frame_height=frame_height,
+        visible_constraints=visible_constraints,
+        predicted_source="predicted_trackman_constrained_3d_physics",
+        observed_source="visible_ball_hard_constraint",
+        transform=lambda side, forward: (
+            x0 + unit_x * forward + right_x * side,
+            z0 + unit_z * forward + right_z * side,
+        ),
+    )
+    if not frames:
+        return _unavailable_trackman(
+            "unavailable_trackman_reconstruction_error",
+            "TrackMan RK4 physics produced no frames",
+            visible_artifact,
         )
+    frame_index_set = {frame["frameIndex"] for frame in frames}
+    visible_overlap_residuals = [0.0 for frame_index in visible_constraints if frame_index in frame_index_set]
+    landing_frame = frames[-1]["frameIndex"]
 
     landing = frames[-1]
     comparison_qc = _trackman_comparison_qc(
         predicted_carry_yd=forward_carry_m / YD_TO_M,
         predicted_apex_yd=apex_m / YD_TO_M,
-        predicted_side_yd=side_yd,
+        predicted_side_yd=side_carry_m / YD_TO_M,
         confirmed_carry_yd=carry_yd,
         confirmed_apex_yd=apex_yd,
         confirmed_side_yd=side_yd,
@@ -903,12 +1188,6 @@ def build_trackman_constrained_3d_trajectory(
         trackman_inputs["totalSideYd"] = total_side_yd
     trackman_inputs.update(optional_trackman_inputs)
     used_trackman_fields, missing_trackman_fields = _used_and_missing_trackman_fields(trackman_reviewed)
-    physics_baseline = simulate_trajectory(
-        LaunchState(position=(x0, 0.0, z0), velocity=(vx, vy, vz), spin_rpm=(0.0, optional_trackman_inputs.get("spinRateRpm", 0.0), 0.0)),
-        ball=BallProperties(cd=0.0, cl=0.0),
-        dt=max(1.0 / fps, 0.002),
-        max_time=max(landing_time + 0.2, 1.0),
-    )
     trajectory = {
         "version": "1.0",
         "stage": "m1_3d_reconstruction",
@@ -921,9 +1200,12 @@ def build_trackman_constrained_3d_trajectory(
         "model": {
             "type": "trackman_constrained_rk4_drag_magnus_3d",
             "modelFamily": "RK4_drag_magnus",
+            "frameGeneration": "rk4_simulate_trajectory",
             "coefficientPolicy": physics_baseline["coefficientPolicy"],
+            "physics": _physics_model_summary(physics_baseline),
+            "trackmanFit": calibrated["fit"],
             "gravityMetersPerSecond2": GRAVITY_MPS2,
-            "verticalAccelerationMetersPerSecond2": round(vertical_acceleration, 6),
+            "verticalAccelerationMetersPerSecond2": round(-GRAVITY_MPS2, 6),
             "calibrationUsed": {
                 "cameraHeightMeters": camera_height_m,
                 "cameraAngleDegrees": pitch_degrees,
@@ -967,6 +1249,8 @@ def build_trackman_constrained_3d_trajectory(
             "curveMeters": curve_m,
             "launchLineSideMeters": launch_line_side_m,
             "apexMeters": apex_m,
+            "localVelocityMps": local_velocity,
+            "spinRpm": spin_rpm,
         },
         "frames": frames,
     }
