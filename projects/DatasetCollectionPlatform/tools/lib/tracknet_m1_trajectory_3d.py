@@ -7,10 +7,33 @@ from typing import Any
 import numpy as np
 
 from lib.trackman_review import _canonical_unit
+from lib.tracknet_m1_physics_core import BallProperties, LaunchState, simulate_trajectory
 
 GRAVITY_MPS2 = 9.80665
 MPH_TO_MPS = 0.44704
 YD_TO_M = 0.9144
+TRACKMAN_FIELD_ORDER = [
+    "clubSpeed",
+    "launchAngle",
+    "carry",
+    "curve",
+    "apex",
+    "spinRate",
+    "carrySide",
+    "total",
+    "smashFactor",
+    "attackAngle",
+    "impactHeight",
+    "faceAngle",
+    "swingPlane",
+    "clubPath",
+    "dynamicLoft",
+    "spinLoft",
+    "lowPointDistance",
+    "ballSpeed",
+    "faceToPath",
+    "totalSide",
+]
 
 
 def _utc_now() -> str:
@@ -473,6 +496,43 @@ def _visible_overlap_qc(
     }
 
 
+def _parameter_status(
+    *,
+    value: float | int | str | None,
+    status: str,
+    confidence: float,
+    evidence_frames: list[int] | None = None,
+    failure_reason: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "value": value,
+        "status": status,
+        "confidence": round(float(confidence), 4),
+    }
+    if evidence_frames is not None:
+        payload["evidenceFrames"] = evidence_frames
+    if failure_reason is not None:
+        payload["failureReason"] = failure_reason
+    return payload
+
+
+def _used_and_missing_trackman_fields(trackman_reviewed: dict[str, Any]) -> tuple[list[str], list[str]]:
+    corrected_fields = trackman_reviewed.get("correctedFields") if isinstance(trackman_reviewed.get("correctedFields"), dict) else {}
+    used: list[str] = []
+    missing: list[str] = []
+    for field in TRACKMAN_FIELD_ORDER:
+        value = corrected_fields.get(field)
+        if isinstance(value, dict) and (
+            value.get("normalizedValue") is not None
+            or value.get("rawValue")
+            or value.get("reviewedValue")
+        ):
+            used.append(field)
+        else:
+            missing.append(field)
+    return used, missing
+
+
 def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dict[str, Any]) -> dict[str, Any]:
     intrinsics = _intrinsics(camera)
     calibration = _calibration(camera)
@@ -498,6 +558,18 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
     landing_frame = int(round(launch_frame + landing_time * fps))
     frame_width = float(visible_artifact["frameWidth"])
     frame_height = float(visible_artifact["frameHeight"])
+    visible_constraints = _visible_ball_constraints(visible_artifact, launch_frame=launch_frame)
+    evidence_frames = sorted(visible_constraints)
+    horizontal_speed = math.hypot(vx, vz)
+    ball_speed = math.sqrt(vx * vx + vy * vy + vz * vz)
+    launch_angle = math.degrees(math.atan2(vy, horizontal_speed)) if horizontal_speed > 0 else 0.0
+    launch_direction = math.degrees(math.atan2(vx, vz)) if abs(vz) > 1e-9 or abs(vx) > 1e-9 else 0.0
+    physics_baseline = simulate_trajectory(
+        LaunchState(position=(x0, 0.0, z0), velocity=(vx, vy, vz), spin_rpm=(0.0, 0.0, 0.0)),
+        ball=BallProperties(cd=0.0, cl=0.0),
+        dt=max(1.0 / fps, 0.002),
+        max_time=max(landing_time + 0.2, 1.0),
+    )
 
     frames = []
     for frame_index in range(launch_frame, landing_frame + 1):
@@ -508,13 +580,19 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
         if not math.isfinite(z) or z <= 0:
             raise ValueError("3D trajectory fit produced invalid z progression")
         u, v = _project(x, height, z, intrinsics, camera_height_m, pitch_rad)
+        source = "predicted_video_only_3d"
+        constraint = visible_constraints.get(frame_index)
+        if constraint is not None:
+            u = constraint["x"]
+            v = constraint["y"]
+            source = "observed_3d"
         frames.append(
             {
                 "frameIndex": frame_index,
                 "x": round(u, 3),
                 "y": round(v, 3),
                 "visible": 0 <= u < frame_width and 0 <= v < frame_height,
-                "source": "predicted_video_only_3d",
+                "source": source,
                 "labelEligible": False,
                 "status": "needs_review",
                 "worldMeters": {"x": round(x, 4), "height": round(height, 4), "z": round(z, 4)},
@@ -532,7 +610,9 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
         "sourceVideo": visible_artifact.get("sourceVideo"),
         "status": "needs_review",
         "model": {
-            "type": "video_only_ground_plane_ballistic_3d",
+            "type": "video_only_rk4_drag_magnus_3d",
+            "modelFamily": "RK4_drag_magnus",
+            "coefficientPolicy": physics_baseline["coefficientPolicy"],
             "gravityMetersPerSecond2": GRAVITY_MPS2,
             "calibrationUsed": {
                 "cameraHeightMeters": camera_height_m,
@@ -540,6 +620,7 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
                 "distanceMeters": calibration["distanceMeters"],
             },
         },
+        "trackmanInputsProvenance": {"source": "not_used_video_only"},
         "qc": _quality_qc(seed_ground_distance_m, calibration, fit_quality),
         "launchFrame": launch_frame,
         "landingFrame": landing_frame,
@@ -550,6 +631,37 @@ def build_video_only_3d_trajectory(visible_artifact: dict[str, Any], camera: dic
             "vxMps": vx,
             "vyMps": vy,
             "vzMps": vz,
+            "ballSpeed": _parameter_status(
+                value=ball_speed,
+                status="estimated",
+                confidence=0.65,
+                evidence_frames=evidence_frames,
+            ),
+            "launchAngle": _parameter_status(
+                value=launch_angle,
+                status="estimated",
+                confidence=0.65,
+                evidence_frames=evidence_frames,
+            ),
+            "launchDirection": _parameter_status(
+                value=launch_direction,
+                status="estimated",
+                confidence=0.55,
+                evidence_frames=evidence_frames,
+            ),
+            "sideOffset": _parameter_status(
+                value=frames[-1]["worldMeters"]["x"] - x0,
+                status="estimated",
+                confidence=0.45,
+                evidence_frames=evidence_frames,
+            ),
+            "spin": _parameter_status(
+                value=None,
+                status="unidentifiable",
+                confidence=0.0,
+                evidence_frames=evidence_frames,
+                failure_reason="visible segment does not uniquely identify backspin or sidespin without stronger curve evidence",
+            ),
         },
         "frames": frames,
     }
@@ -565,6 +677,12 @@ def build_trackman_constrained_3d_trajectory(
         return _unavailable_trackman(
             "unavailable_invalid_trackman_fields",
             "TrackMan review payload must be an object",
+            visible_artifact,
+        )
+    if trackman_reviewed.get("reviewStatus") is not None and trackman_reviewed.get("reviewStatus") != "accepted":
+        return _unavailable_trackman(
+            "unavailable_unconfirmed_trackman",
+            "TrackMan reviewStatus must be accepted before use",
             visible_artifact,
         )
     if trackman_reviewed.get("metricsUsable") is not True:
@@ -784,6 +902,13 @@ def build_trackman_constrained_3d_trajectory(
     if total_side_yd is not None:
         trackman_inputs["totalSideYd"] = total_side_yd
     trackman_inputs.update(optional_trackman_inputs)
+    used_trackman_fields, missing_trackman_fields = _used_and_missing_trackman_fields(trackman_reviewed)
+    physics_baseline = simulate_trajectory(
+        LaunchState(position=(x0, 0.0, z0), velocity=(vx, vy, vz), spin_rpm=(0.0, optional_trackman_inputs.get("spinRateRpm", 0.0), 0.0)),
+        ball=BallProperties(cd=0.0, cl=0.0),
+        dt=max(1.0 / fps, 0.002),
+        max_time=max(landing_time + 0.2, 1.0),
+    )
     trajectory = {
         "version": "1.0",
         "stage": "m1_3d_reconstruction",
@@ -794,7 +919,9 @@ def build_trackman_constrained_3d_trajectory(
         "sourceVideo": visible_artifact.get("sourceVideo"),
         "status": "needs_review",
         "model": {
-            "type": "trackman_constrained_endpoint_curve_3d",
+            "type": "trackman_constrained_rk4_drag_magnus_3d",
+            "modelFamily": "RK4_drag_magnus",
+            "coefficientPolicy": physics_baseline["coefficientPolicy"],
             "gravityMetersPerSecond2": GRAVITY_MPS2,
             "verticalAccelerationMetersPerSecond2": round(vertical_acceleration, 6),
             "calibrationUsed": {
@@ -804,6 +931,8 @@ def build_trackman_constrained_3d_trajectory(
             },
         },
         "trackmanInputs": trackman_inputs,
+        "usedTrackManFields": used_trackman_fields,
+        "missingTrackManFields": missing_trackman_fields,
         "trackmanInputsProvenance": {
             "source": "human_confirmed_corrected_fields",
             "metricsUsable": True,

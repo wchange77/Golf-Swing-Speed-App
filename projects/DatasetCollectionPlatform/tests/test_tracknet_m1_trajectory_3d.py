@@ -113,6 +113,22 @@ def test_video_only_3d_trajectory_accepts_prebuilt_geometry_evidence():
     assert trajectory["frames"]
 
 
+def test_video_only_3d_parameters_record_status_and_no_trackman_dependency():
+    result = build_video_only_3d_trajectory(_visible_artifact(), _camera())
+
+    trajectory = result["videoOnly3d"]
+    assert trajectory["model"]["type"] == "video_only_rk4_drag_magnus_3d"
+    assert trajectory["model"]["modelFamily"] == "RK4_drag_magnus"
+    params = trajectory["parameters"]
+    for key in ("ballSpeed", "launchAngle", "launchDirection", "sideOffset", "spin"):
+        assert "status" in params[key]
+        assert "confidence" in params[key]
+    assert params["spin"]["status"] in {"priorAssisted", "unidentifiable"}
+    assert trajectory["trackmanInputsProvenance"] == {"source": "not_used_video_only"}
+    assert any(frame["source"] == "observed_3d" for frame in trajectory["frames"])
+    assert any(frame["source"] == "predicted_video_only_3d" for frame in trajectory["frames"])
+
+
 def test_video_only_3d_trajectory_requires_three_visible_points():
     artifact = _visible_artifact()
     artifact["ballSmoothVisibleFrames"] = artifact["ballSmoothVisibleFrames"][:2]
@@ -238,7 +254,8 @@ def test_trackman_constrained_trajectory_uses_confirmed_metrics():
 
     trajectory = result["trackmanConstrained3d"]
     assert trajectory["status"] == "needs_review"
-    assert trajectory["model"]["type"] == "trackman_constrained_endpoint_curve_3d"
+    assert trajectory["model"]["type"] == "trackman_constrained_rk4_drag_magnus_3d"
+    assert trajectory["model"]["modelFamily"] == "RK4_drag_magnus"
     assert trajectory["model"]["gravityMetersPerSecond2"] == GRAVITY_MPS2
     assert trajectory["model"]["verticalAccelerationMetersPerSecond2"] == pytest.approx(-GRAVITY_MPS2)
     assert trajectory["trackmanInputs"] == {
@@ -379,6 +396,50 @@ def test_trackman_constrained_trajectory_accepts_chinese_unit_aliases():
     trajectory = result["trackmanConstrained3d"]
     assert trajectory["status"] == "needs_review"
     assert trajectory["frames"]
+
+
+def test_trackman_constrained_trajectory_requires_accepted_review_status_when_present():
+    reviewed = {
+        "reviewStatus": "rejected",
+        "metricsUsable": True,
+        "correctedFields": {
+            "ballSpeed": {"normalizedValue": 100.0, "normalizedUnit": "mph"},
+            "launchAngle": {"normalizedValue": 16.0, "normalizedUnit": "deg"},
+        },
+    }
+
+    result = build_trackman_constrained_3d_trajectory(_visible_artifact(), _camera(), reviewed)
+
+    _assert_unavailable_schema(
+        result["trackmanConstrained3d"],
+        "unavailable_unconfirmed_trackman",
+        "reviewStatus must be accepted",
+    )
+
+
+def test_trackman_constrained_trajectory_reports_used_and_missing_trackman_fields():
+    reviewed = {
+        "reviewStatus": "accepted",
+        "metricsUsable": True,
+        "correctedFields": {
+            "ballSpeed": {"normalizedValue": 100.0, "normalizedUnit": "mph"},
+            "launchAngle": {"normalizedValue": 16.0, "normalizedUnit": "deg"},
+            "carry": {"normalizedValue": 150.0, "normalizedUnit": "yd"},
+            "apex": {"normalizedValue": 30.0, "normalizedUnit": "yd"},
+            "spinRate": {"normalizedValue": 3500.0, "normalizedUnit": "rpm"},
+            "carrySide": {"normalizedValue": 12.0, "normalizedUnit": "yd", "direction": "right"},
+        },
+    }
+
+    result = build_trackman_constrained_3d_trajectory(_visible_artifact(), _camera(), reviewed)
+
+    trajectory = result["trackmanConstrained3d"]
+    assert trajectory["model"]["modelFamily"] == "RK4_drag_magnus"
+    assert set(["ballSpeed", "launchAngle", "carry", "apex", "spinRate", "carrySide"]).issubset(
+        set(trajectory["usedTrackManFields"])
+    )
+    assert "totalSide" in trajectory["missingTrackManFields"]
+    assert trajectory["frames"][-1]["worldMeters"]["height"] <= 0.05
 
 
 def test_trackman_constrained_trajectory_rejects_unconfirmed_trackman():
