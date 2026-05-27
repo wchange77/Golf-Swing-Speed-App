@@ -68,6 +68,24 @@ def _make_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     return batch_index_path, reviewed_labels_path, review_output_dir
 
 
+def _make_predicted_label_inputs(tmp_path: Path, *, source: str, label_eligible: str) -> tuple[Path, Path, Path]:
+    batch_index_path, reviewed_labels_path, review_output_dir = _make_inputs(tmp_path)
+    with reviewed_labels_path.open("w", encoding="utf-8", newline="") as handle:
+        fieldnames = [*LABEL_FIELDS, "source", "labelEligible", "predictedFlight"]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for frame_index in (31, 32):
+            writer.writerow({
+                "sample_id": "sample_001", "session_id": "sess_001", "shot_id": "shot_001",
+                "frame_index": str(frame_index), "x": "80.000", "y": "90.000", "visible": "1",
+                "frame_width": "320", "frame_height": "180", "source_video": "DatasetCollectorExport/assets/ball.mov",
+                "trackman_match_id": "1", "reviewed_by": "tester", "reviewed_at": "2026-05-21T00:00:01Z",
+                "label_source": "manual_review", "source": source, "labelEligible": label_eligible,
+                "predictedFlight": "true",
+            })
+    return batch_index_path, reviewed_labels_path, review_output_dir
+
+
 def test_export_m1_package_writes_required_files_and_passes_validator(tmp_path):
     batch_index_path, reviewed_labels_path, review_output_dir = _make_inputs(tmp_path)
     package_dir = tmp_path / "package"
@@ -101,4 +119,23 @@ def test_export_m1_package_fails_when_minimum_counts_not_met(tmp_path):
             min_shots=5,
             min_total_labels=100,
             min_labels_per_shot=20,
+        )
+
+
+def test_export_m1_package_rejects_legacy_predicted_flight_rows(tmp_path):
+    batch_index_path, reviewed_labels_path, review_output_dir = _make_predicted_label_inputs(
+        tmp_path,
+        source="predicted_image_only",
+        label_eligible="false",
+    )
+
+    with pytest.raises(TrackNetM1ValidationError, match="legacy_predicted_flight_not_training_truth"):
+        export_m1_package(
+            batch_index_path,
+            reviewed_labels_path,
+            review_output_dir,
+            tmp_path / "package",
+            min_shots=1,
+            min_total_labels=2,
+            min_labels_per_shot=2,
         )

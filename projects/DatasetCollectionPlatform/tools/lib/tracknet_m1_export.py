@@ -34,6 +34,25 @@ def _rows_by_sample(rows: list[dict[str, str]]) -> dict[str, list[dict[str, str]
     return grouped
 
 
+def _reject_legacy_predicted_rows(rows: list[dict[str, str]]) -> None:
+    rejection_reason = "legacy_predicted_flight_not_training_truth"
+    false_values = {"0", "false", "no", "n"}
+    for index, row in enumerate(rows, start=2):
+        label_source = str(row.get("label_source") or "")
+        source = str(row.get("source") or "")
+        predicted_flag = str(row.get("predictedFlight") or "").strip().lower()
+        label_eligible = str(row.get("labelEligible") or "").strip().lower()
+        if (
+            label_source.startswith("predicted_")
+            or source.startswith("predicted_")
+            or predicted_flag in {"1", "true", "yes", "y"}
+            or label_eligible in false_values
+        ):
+            raise TrackNetM1ValidationError(
+                f"labels.csv row {index} rejected: {rejection_reason}"
+            )
+
+
 def _copy_previews(review_output_dir: Path, package_dir: Path) -> None:
     target = package_dir / "previews"
     source = review_output_dir / "frames"
@@ -98,6 +117,7 @@ def export_m1_package(
     package_dir = Path(package_dir)
     batch = _load_json(batch_index_path)
     rows = read_label_rows(reviewed_labels_path)
+    _reject_legacy_predicted_rows(rows)
     for index, row in enumerate(rows, start=2):
         validate_label_row(row, row_index=index)
     grouped = _rows_by_sample(rows)
